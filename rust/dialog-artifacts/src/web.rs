@@ -30,15 +30,20 @@
 
 use std::{pin::Pin, str::FromStr, sync::Arc};
 
+use async_trait::async_trait;
 use base58::{FromBase58, ToBase58};
 use dialog_storage::{
-    Blake3Hash, IndexedDbStorageBackend, StorageCache, web::ObjectSafeStorageBackend,
+    Blake3Hash, DialogStorageError, IndexedDbStorageBackend, StorageBackend, StorageCache,
+    web::ObjectSafeStorageBackend,
 };
 use futures_util::{Stream, StreamExt};
 use rand::{Rng, distributions::Alphanumeric};
 use tokio::sync::{Mutex, RwLock};
-use wasm_bindgen::{convert::TryFromJsValue, prelude::*};
-use wasm_bindgen_futures::js_sys::{self, Object, Reflect, Symbol, Uint8Array};
+use wasm_bindgen::{JsCast, convert::TryFromJsValue, prelude::*};
+use wasm_bindgen_futures::{
+    JsFuture,
+    js_sys::{self, Object, Reflect, Symbol, Uint8Array},
+};
 
 use crate::{
     Artifact, ArtifactSelector, ArtifactStore, ArtifactStoreMutExt, ArtifactViewStream as _,
@@ -115,6 +120,16 @@ interface ArtifactSelector {
  * The shape of the "async iterable" that is returned by `Artifacts.select`
  */
 type ArtifactIterable = AsyncIterable<Artifact & ArtifactApi>;
+
+/**
+ * A caller-provided storage backend for `Artifacts.openWith`. Keys are
+ * 32-byte BLAKE3 hashes; values are opaque block bytes. `get` resolves
+ * `undefined` when the key is absent.
+ */
+interface StorageBackend {
+  get(key: Uint8Array): Promise<Uint8Array | undefined>;
+  set(key: Uint8Array, value: Uint8Array): Promise<void>;
+}
 "#;
 
 #[wasm_bindgen]
@@ -130,6 +145,10 @@ extern "C" {
     #[allow(missing_docs)]
     #[wasm_bindgen(typescript_type = "Artifact")]
     pub type ArtifactDuckType;
+
+    #[allow(missing_docs)]
+    #[wasm_bindgen(typescript_type = "StorageBackend")]
+    pub type StorageBackendDuckType;
 
     #[wasm_bindgen(js_namespace = console)]
     fn log(s: &str);
@@ -183,6 +202,70 @@ type WebStorageBackend = Arc<Mutex<dyn ObjectSafeStorageBackend>>;
 
 const STORAGE_CACHE_CAPACITY: usize = 2usize.pow(16);
 
+/// A [`StorageBackend`] that delegates to a JavaScript object with async
+/// `get(key)` / `set(key, value)` methods over `Uint8Array`s, allowing the
+/// caller of [`ArtifactsBinding::open_with`] to supply arbitrary storage
+/// (OPFS, remote archives, encrypting decorators) from JavaScript.
+#[derive(Clone)]
+struct JsStorageBackend {
+    inner: JsValue,
+}
+
+impl JsStorageBackend {
+    fn method(&self, name: &str) -> Result<js_sys::Function, DialogStorageError> {
+        Reflect::get(&self.inner, &JsValue::from_str(name))
+            .ok()
+            .and_then(|value| value.dyn_into::<js_sys::Function>().ok())
+            .ok_or_else(|| {
+                DialogStorageError::Storage(format!(
+                    "Storage backend has no `{name}` method"
+                ))
+            })
+    }
+}
+
+fn js_storage_error(error: JsValue) -> DialogStorageError {
+    DialogStorageError::Storage(format!("{error:?}"))
+}
+
+#[async_trait(?Send)]
+impl StorageBackend for JsStorageBackend {
+    type Key = Blake3Hash;
+    type Value = Vec<u8>;
+    type Error = DialogStorageError;
+
+    async fn set(&mut self, key: Self::Key, value: Self::Value) -> Result<(), Self::Error> {
+        let promise = self
+            .method("set")?
+            .call2(
+                &self.inner,
+                &Uint8Array::from(key.as_ref()).into(),
+                &Uint8Array::from(value.as_slice()).into(),
+            )
+            .map_err(js_storage_error)?;
+        JsFuture::from(js_sys::Promise::from(promise))
+            .await
+            .map_err(js_storage_error)?;
+        Ok(())
+    }
+
+    async fn get(&self, key: &Self::Key) -> Result<Option<Self::Value>, Self::Error> {
+        let promise = self
+            .method("get")?
+            .call1(&self.inner, &Uint8Array::from(key.as_ref()).into())
+            .map_err(js_storage_error)?;
+        let result = JsFuture::from(js_sys::Promise::from(promise))
+            .await
+            .map_err(js_storage_error)?;
+
+        if result.is_undefined() || result.is_null() {
+            return Ok(None);
+        }
+
+        Ok(Some(Uint8Array::new(&result).to_vec()))
+    }
+}
+
 /// A triple store that can be used to store and retrieve semantic triples
 /// in the form of `Artifact`s.
 #[wasm_bindgen(js_name = "Artifacts")]
@@ -221,6 +304,33 @@ impl ArtifactsBinding {
             IndexedDbStorageBackend::new(&identifier)
                 .await
                 .map_err(|error| DialogArtifactsError::from(error))?,
+            STORAGE_CACHE_CAPACITY,
+        )
+        .map_err(|error| DialogArtifactsError::from(error))?;
+
+        // Erase the type:
+        let storage_backend: WebStorageBackend = Arc::new(Mutex::new(storage_backend));
+        let artifacts = Artifacts::open(identifier.to_owned(), storage_backend).await?;
+
+        Ok(Self {
+            artifacts: Arc::new(RwLock::new(artifacts)),
+        })
+    }
+
+    /// Construct a new `Artifacts` over a caller-provided storage backend:
+    /// any object with async `get(key)` and `set(key, value)` methods over
+    /// `Uint8Array`s. The caller owns persistence and any layering (caching,
+    /// encryption, remote fetch); the same `identifier` must be paired with
+    /// the same backing data across sessions.
+    #[wasm_bindgen(js_name = "openWith")]
+    pub async fn open_with(
+        identifier: String,
+        backend: StorageBackendDuckType,
+    ) -> Result<Self, JsError> {
+        let storage_backend = StorageCache::new(
+            JsStorageBackend {
+                inner: backend.into(),
+            },
             STORAGE_CACHE_CAPACITY,
         )
         .map_err(|error| DialogArtifactsError::from(error))?;
