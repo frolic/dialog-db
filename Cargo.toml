@@ -191,39 +191,51 @@ zerocopy = "0.8"
 zerocopy-derive = "0.8"
 
 [workspace.dependencies.dialog-artifacts]
+default-features = false
 path = "./rust/dialog-artifacts"
 
 [workspace.dependencies.dialog-capability]
+default-features = false
 path = "./rust/dialog-capability"
 
 [workspace.dependencies.dialog-common]
+default-features = false
 path = "./rust/dialog-common"
 
 [workspace.dependencies.dialog-credentials]
+default-features = false
 path = "./rust/dialog-credentials"
 
 [workspace.dependencies.dialog-did-web]
+default-features = false
 path = "./rust/dialog-did-web"
 
 [workspace.dependencies.dialog-encoding]
+default-features = false
 path = "./rust/dialog-encoding"
 
 [workspace.dependencies.dialog-csv]
+default-features = false
 path = "./rust/dialog-csv"
 
 [workspace.dependencies.dialog-search-tree]
+default-features = false
 path = "./rust/dialog-search-tree"
 
 [workspace.dependencies.dialog-storage]
+default-features = false
 path = "./rust/dialog-storage"
 
 [workspace.dependencies.dialog-effects]
+default-features = false
 path = "./rust/dialog-effects"
 
 [workspace.dependencies.dialog-macros]
+default-features = false
 path = "./rust/dialog-macros"
 
 [workspace.dependencies.dialog-query]
+default-features = false
 path = "./rust/dialog-query"
 
 # [patch.crates-io]
@@ -231,19 +243,25 @@ path = "./rust/dialog-query"
 # csv-async = { git = "https://github.com/cdata/csv-async.git" }
 
 [workspace.dependencies.dialog-remote-s3]
+default-features = false
 path = "./rust/dialog-remote-s3"
 
 [workspace.dependencies.dialog-remote-ucan-s3]
+default-features = false
 path = "./rust/dialog-remote-ucan-s3"
 
 [workspace.dependencies.dialog-remote-fs]
+default-features = false
 path = "./rust/dialog-remote-fs"
 
 [workspace.dependencies.dialog-identity]
+default-features = false
 path = "./rust/dialog-identity"
 
 [workspace.dependencies.dialog-operator]
+default-features = false
 path = "./rust/dialog-operator"
 
 [workspace.dependencies.dialog-repository]
+default-features = false
 path = "./rust/dialog-repository"
