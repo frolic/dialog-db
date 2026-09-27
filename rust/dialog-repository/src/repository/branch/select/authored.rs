@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use dialog_artifacts::history::{Authorship, TreeHistory, Version};
 use dialog_artifacts::{Artifact, DialogArtifactsError};
@@ -8,6 +8,7 @@ use dialog_effects::archive::{Get, Put};
 use dialog_effects::memory::Resolve;
 use dialog_storage::{Blake3Hash, DialogStorageError, StorageBackend};
 use futures_util::TryStreamExt as _;
+use futures_util::future::try_join_all;
 
 use super::Select;
 use crate::{NetworkedIndex, RemoteSite};
@@ -73,23 +74,31 @@ impl SelectAuthored<'_> {
         )
         .with_record_cache(self.0.source.records());
         let views: Vec<_> = self.0.execute(store).await?.try_collect().await?;
-        let mut authorships: HashMap<Version, Option<Authorship>> = HashMap::new();
+        // Each revision's authorship is read once, and all of them at
+        // once: on a replica that hydrates from a remote, one read after
+        // another costs a round trip per revision.
+        let versions: HashSet<Version> = views
+            .iter()
+            .flat_map(|view| view.versions().copied())
+            .collect();
+        let authorships: HashMap<Version, Option<Authorship>> =
+            try_join_all(versions.into_iter().map(|version| {
+                let history = &history;
+                async move {
+                    Ok::<_, DialogArtifactsError>((version, history.authorship(&version).await?))
+                }
+            }))
+            .await?
+            .into_iter()
+            .collect();
         let mut rows = Vec::with_capacity(views.len());
         for view in views {
             let artifact = view.to_owned()?;
-            let mut author = None;
-            for version in view.versions() {
-                if !authorships.contains_key(version) {
-                    let authorship = history.authorship(version).await?;
-                    authorships.insert(*version, authorship);
-                }
-                if let Some(Some(authorship)) = authorships.get(version)
-                    && authorship.asserted(&artifact)
-                {
-                    author = authorship.author().parse::<Did>().ok();
-                    break;
-                }
-            }
+            let author = view
+                .versions()
+                .filter_map(|version| authorships.get(version).and_then(Option::as_ref))
+                .find(|authorship| authorship.asserted(&artifact))
+                .and_then(|authorship| authorship.author().parse::<Did>().ok());
             rows.push(AuthoredArtifact { artifact, author });
         }
         Ok(rows)
