@@ -229,6 +229,17 @@ mod tests {
     /// named whole.
     #[dialog_common::test]
     async fn it_names_what_shows_the_newest_facts_with_their_authors() -> Result<()> {
+        show_newest(300, 200, 20).await
+    }
+
+    /// A reader that holds only the root and the nodes a head names shows
+    /// every fact under a prefix when a page holds them all.
+    #[dialog_common::test]
+    async fn it_names_what_shows_every_fact_of_a_small_tree() -> Result<()> {
+        show_newest(40, 4_000, 240).await
+    }
+
+    async fn show_newest(notes: usize, body: usize, limit: usize) -> Result<()> {
         let (operator, profile) = test_operator_with_profile().await;
         let repository = profile
             .repository(unique_name("prefetch-newest"))
@@ -245,10 +256,10 @@ mod tests {
             )?]))
             .perform(&operator)
             .await?;
-        for index in 0..300 {
+        for index in 0..notes {
             let note = fact(
                 format!("note:{:04}", 9_999 - index),
-                format!("{index} {}", "n".repeat(200)),
+                format!("{index} {}", "n".repeat(body)),
             )?;
             branch
                 .commit(stream::iter(vec![note]))
@@ -288,8 +299,8 @@ mod tests {
             (
                 ArtifactSelector::new()
                     .of_starting_with("note:")
-                    .with_limit(20),
-                20,
+                    .with_limit(limit),
+                limit.min(notes),
             ),
             (ArtifactSelector::new().of("name:owner".parse()?), 1),
         ] {
