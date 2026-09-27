@@ -245,7 +245,7 @@ where
         }
         _ => RemoteFallback::None,
     };
-    NetworkedIndex::new(env, source.archive().index(), remote)
+    NetworkedIndex::new(env, source.archive().index(), remote, source.codec())
 }
 
 /// The size recorded for `hash` in the line's blob index, or `None` if the
@@ -522,7 +522,12 @@ where
         }
         None => RemoteFallback::None,
     };
-    let mut store = NetworkedIndex::new(env, branch.archive().index(), remote);
+    let mut store = NetworkedIndex::new(
+        env,
+        branch.archive().index(),
+        remote,
+        branch.codec().clone(),
+    );
 
     let base_tree_hash = base_revision
         .as_ref()
@@ -530,7 +535,7 @@ where
         .unwrap_or(EMPTY_TREE_HASH);
     let mut tree = Index::from_hash(NodeHash::from(base_tree_hash));
 
-    let mut delta = Delta::zero();
+    let mut delta = Delta::encoded_with(dialog_storage::StorageBackend::block_codec(&store));
     match &edit {
         BlobIndexEdit::Put { hash, record } => {
             tree.put_blob(&mut store, &mut delta, hash, *record).await?;

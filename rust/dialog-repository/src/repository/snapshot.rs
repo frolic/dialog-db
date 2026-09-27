@@ -74,6 +74,7 @@ use dialog_search_tree::{
     ArchivedNodeBody, ContentAddressedStorage as TreeStorage, NoveltyOp, Traversable as _, Visit,
     into_owned,
 };
+use dialog_storage::BlockCodec;
 use futures_util::future::Either;
 use futures_util::{Stream, StreamExt as _, stream};
 use parking_lot::RwLock;
@@ -189,6 +190,7 @@ impl Block {
 #[derive(Debug)]
 pub struct Snapshot {
     subject: Subject,
+    codec: BlockCodec,
     head: RwLock<Head>,
     caches: Caches,
     overlay: Ephemeral,
@@ -213,7 +215,7 @@ impl<C: Principal> Repository<C> {
     /// [`Branch::snapshot`] when a branch handle at the revision is at
     /// hand, so its warm caches carry over.
     pub fn snapshot(&self, revision: Revision) -> Snapshot {
-        Snapshot::new(self.subject(), revision)
+        Snapshot::new(self.subject(), revision).encoded_with(self.codec().clone())
     }
 }
 
@@ -232,6 +234,7 @@ impl Branch {
         let revision = self.revision()?;
         Some(Snapshot {
             subject: self.subject(),
+            codec: self.codec().clone(),
             head: RwLock::new(Head {
                 revision,
                 lineage: None,
@@ -247,6 +250,7 @@ impl Snapshot {
     pub fn new(subject: Subject, revision: Revision) -> Self {
         Snapshot {
             subject,
+            codec: BlockCodec::Plain,
             head: RwLock::new(Head {
                 revision,
                 lineage: None,
@@ -265,12 +269,14 @@ impl Snapshot {
     /// head to the staged tip with the versions exactly as minted.
     pub(crate) fn staged(
         subject: Subject,
+        codec: BlockCodec,
         revision: Revision,
         caches: Caches,
         line: Entity,
     ) -> Self {
         Snapshot {
             subject,
+            codec,
             head: RwLock::new(Head {
                 revision,
                 lineage: Some(line),
@@ -278,6 +284,20 @@ impl Snapshot {
             caches,
             overlay: Ephemeral::default(),
         }
+    }
+
+    /// The same view, reading and writing tree blocks encoded with `codec`.
+    ///
+    /// A view of a sealed repository needs the repository's codec; prefer
+    /// [`Repository::snapshot`](crate::Repository::snapshot), which passes
+    /// it.
+    pub fn encoded_with(self, codec: BlockCodec) -> Self {
+        Self { codec, ..self }
+    }
+
+    /// The codec this snapshot's tree blocks are encoded with.
+    pub fn codec(&self) -> &BlockCodec {
+        &self.codec
     }
 
     /// The revision this snapshot names.
@@ -448,6 +468,7 @@ impl Clone for Snapshot {
     fn clone(&self) -> Self {
         Snapshot {
             subject: self.subject.clone(),
+            codec: self.codec.clone(),
             head: RwLock::new(Head {
                 revision: self.revision(),
                 lineage: None,
@@ -637,6 +658,7 @@ impl SnapshotExport {
     {
         let catalog = self.snapshot.index();
         let subject = self.snapshot.subject.clone();
+        let codec = self.snapshot.codec().clone();
         let upstream = match &self.reach {
             Reach::Download(remote) => Some(remote.clone()),
             Reach::Complete | Reach::Sparse => None,
@@ -652,7 +674,7 @@ impl SnapshotExport {
             // With an upstream a read-miss falls through to the remote and
             // is cached; without one the index is exactly what this store
             // holds.
-            let index = NetworkedIndex::new(env, catalog, upstream);
+            let index = NetworkedIndex::new(env, catalog, upstream, codec);
             let storage = TreeStorage::new(TreeStorageBridge(index.clone()));
             let tree = Index::from_hash(root);
 

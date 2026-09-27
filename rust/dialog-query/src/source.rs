@@ -106,7 +106,12 @@ pub(crate) mod test {
             &self,
             input: Blake3Hash,
         ) -> Result<Option<Vec<u8>>, DialogArtifactsError> {
-            let store = NetworkedIndex::new(self.operator, self.branch.archive().index(), None);
+            let store = NetworkedIndex::new(
+                self.operator,
+                self.branch.archive().index(),
+                None,
+                self.branch.codec().clone(),
+            );
             Ok(StorageBackend::get(&store, &input).await?)
         }
     }

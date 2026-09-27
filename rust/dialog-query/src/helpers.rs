@@ -427,7 +427,7 @@ where
         input: ArtifactSelector<Constrained>,
     ) -> Result<ArtifactStream<'a>, DialogArtifactsError> {
         let select = self.branch.claims().select(input);
-        let store = NetworkedIndex::new(self.operator, select.catalog(), None);
+        let store = NetworkedIndex::new(self.operator, select.catalog(), None, select.codec());
         let counting = CountingStore::new(store, self.journal.clone());
         let stream = select.execute(counting).await?;
         Ok(Box::pin(stream))
@@ -463,7 +463,7 @@ where
         // Route the estimate's root read through the same counting store as
         // the scans, so a bench sees the block it costs.
         let select = self.branch.claims().select(input);
-        let store = NetworkedIndex::new(self.operator, select.catalog(), None);
+        let store = NetworkedIndex::new(self.operator, select.catalog(), None, select.codec());
         let counting = CountingStore::new(store, self.journal.clone());
         select.estimate(counting).await
     }
@@ -497,7 +497,12 @@ where
         + 'static,
 {
     async fn execute(&self, input: Blake3Hash) -> Result<Option<Vec<u8>>, DialogArtifactsError> {
-        let store = NetworkedIndex::new(self.operator, self.branch.archive().index(), None);
+        let store = NetworkedIndex::new(
+            self.operator,
+            self.branch.archive().index(),
+            None,
+            self.branch.codec().clone(),
+        );
         let counting = CountingStore::new(store, self.journal.clone());
         Ok(counting.get(&input).await?)
     }
@@ -663,7 +668,7 @@ where
             .claims()
             .select(ArtifactSelector::new().the(the))
             .to_owned();
-        let store = NetworkedIndex::new(&self.operator, select.catalog(), None);
+        let store = NetworkedIndex::new(&self.operator, select.catalog(), None, select.codec());
         let journaled = JournaledStorage::new(store);
         journaled.clear_journal();
 
@@ -1998,7 +2003,7 @@ mod test {
             .claims()
             .select(ArtifactSelector::new().the(the))
             .to_owned();
-        let store = NetworkedIndex::new(env.operator(), select.catalog(), None);
+        let store = NetworkedIndex::new(env.operator(), select.catalog(), None, select.codec());
         let stats = distribution::capture(&root, &store).await?;
         distribution::report(&format!("se-replay-{limit}"), &stats);
         Ok(())

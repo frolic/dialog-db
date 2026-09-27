@@ -1,25 +1,43 @@
 use dialog_capability::{Did, Subject};
+use dialog_storage::BlockCodec;
 
 use crate::{Cell, LoadBranch, OpenBranch, Revision, Upstreams};
 use dialog_effects::memory::prelude::SpaceScope;
 
 /// A reference to a named branch within a repository's memory.
 ///
-/// Wraps `SpaceScope` scoped to `branch/{name}`.
+/// Wraps `SpaceScope` scoped to `branch/{name}`, and the codec the
+/// repository's tree blocks are encoded with.
 /// Use `.open()` or `.load()` to create a command, then `.perform(&env)`.
 #[derive(Debug, Clone)]
-pub struct BranchReference(SpaceScope);
+pub struct BranchReference {
+    space: SpaceScope,
+    codec: BlockCodec,
+}
 
 impl From<SpaceScope> for BranchReference {
     fn from(space: SpaceScope) -> Self {
-        Self(space)
+        Self {
+            space,
+            codec: BlockCodec::Plain,
+        }
     }
 }
 
 impl BranchReference {
+    /// The same branch, with its tree blocks encoded with `codec`.
+    pub fn encoded_with(self, codec: BlockCodec) -> Self {
+        Self { codec, ..self }
+    }
+
+    /// The codec this branch's tree blocks are encoded with.
+    pub fn codec(&self) -> &BlockCodec {
+        &self.codec
+    }
+
     /// The DID of the repository this branch belongs to.
     pub fn of(&self) -> &Did {
-        self.0.subject()
+        self.space.subject()
     }
 
     /// The subject (repository) this branch belongs to.
@@ -29,7 +47,10 @@ impl BranchReference {
 
     /// The branch name, extracted from the space path.
     pub fn name(&self) -> &str {
-        self.0.space_name().strip_prefix("branch/").unwrap_or("")
+        self.space
+            .space_name()
+            .strip_prefix("branch/")
+            .unwrap_or("")
     }
 
     /// Open the branch, creating it if it doesn't exist.
@@ -63,6 +84,6 @@ impl BranchReference {
 
     /// Create a typed cell within this branch's space.
     pub fn cell<T>(&self, cell_name: impl Into<String>) -> Cell<T> {
-        self.0.clone().cell(cell_name).into()
+        self.space.clone().cell(cell_name).into()
     }
 }

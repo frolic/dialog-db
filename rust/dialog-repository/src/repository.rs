@@ -45,6 +45,8 @@ pub use open::*;
 mod remote;
 pub use remote::*;
 
+mod seal;
+
 mod snapshot;
 pub use snapshot::*;
 
@@ -57,6 +59,11 @@ pub(crate) mod source;
 // `dialog_repository::{Revision, TreeReference}` paths.
 pub use dialog_artifacts::{EMPTY_TREE_HASH, Revision, TreeReference};
 
+// The key a sealed repository is created and opened with, and the codec a
+// repository's tree blocks are encoded with.
+pub use dialog_crypto::SealKey;
+pub use dialog_storage::BlockCodec;
+
 /// A repository scoped to a specific subject.
 ///
 /// The credential type parameter determines access level:
@@ -64,11 +71,29 @@ pub use dialog_artifacts::{EMPTY_TREE_HASH, Revision, TreeReference};
 /// - `Repository<Credential>` -- either signer or verifier, determined at runtime
 pub struct Repository<C: Principal = Credential> {
     credential: C,
+    codec: BlockCodec,
 }
 
 impl<C: Principal> Repository<C> {
     fn new(credential: C) -> Self {
-        Self { credential }
+        Self {
+            credential,
+            codec: BlockCodec::Plain,
+        }
+    }
+
+    /// The same repository, with its tree blocks encoded with `codec`.
+    ///
+    /// Crate-internal: a caller gets a sealed repository from the sealed
+    /// create, open, and load commands, which check the recorded seal.
+    pub(crate) fn encoded_with(self, codec: BlockCodec) -> Self {
+        Self { codec, ..self }
+    }
+
+    /// The codec this repository's tree blocks are encoded with: plain,
+    /// or sealed under the repository's key.
+    pub fn codec(&self) -> &BlockCodec {
+        &self.codec
     }
 
     /// Get the credential.
@@ -90,7 +115,7 @@ impl<C: Principal> Repository<C> {
     ///
     /// Call `.open()` or `.load()` on the returned reference.
     pub fn branch(&self, name: impl Into<String>) -> BranchReference {
-        self.subject().branch(name)
+        self.subject().branch(name).encoded_with(self.codec.clone())
     }
 
     /// Get a remote reference for the given name.
@@ -1871,7 +1896,8 @@ mod tests {
             let select = branch
                 .claims()
                 .select(ArtifactSelector::new().the("dialog.branch/name".parse()?));
-            let store = crate::NetworkedIndex::new(&operator, select.catalog(), None);
+            let store =
+                crate::NetworkedIndex::new(&operator, select.catalog(), None, select.codec());
             let stream = select.execute(store).await?;
             let leaked: Vec<_> = stream.collect::<Vec<_>>().await;
 
@@ -2145,7 +2171,8 @@ mod tests {
                 // we see tree-order output without auto-metadata noise.
                 // The branch's prolly tree is the order ground truth.
                 let select = branch.claims().select(sel.clone());
-                let store = crate::NetworkedIndex::new(&operator, select.catalog(), None);
+                let store =
+                    crate::NetworkedIndex::new(&operator, select.catalog(), None, select.codec());
                 let branch_stream: ArtifactStream<'_> = Box::pin(select.execute(store).await?);
                 let branch_order = keys_from_stream(branch_stream).await?;
 

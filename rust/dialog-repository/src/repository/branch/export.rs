@@ -57,7 +57,7 @@ impl<E: Exporter> Export<'_, E> {
         };
 
         let catalog = ArchiveScope::new(branch.subject()).index();
-        let store = NetworkedIndex::new(env, catalog, remote);
+        let store = NetworkedIndex::new(env, catalog, remote, branch.codec().clone());
 
         let tree_hash = branch
             .revision()

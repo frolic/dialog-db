@@ -1,0 +1,273 @@
+#[cfg(target_arch = "wasm32")]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_dedicated_worker);
+
+use anyhow::Result;
+use dialog_artifacts::tree::TreeStorageBridge;
+use dialog_artifacts::{Artifact, ArtifactSelector, DialogArtifactsError, Instruction, Value};
+use dialog_common::Blake3Hash as NodeHash;
+use dialog_crypto::SEALED_BLOCK_MAGIC;
+use dialog_effects::archive::prelude::ArchiveScope;
+use dialog_identity::{Profile, SpaceHandle};
+use dialog_operator::Operator;
+use dialog_operator::helpers::{test_operator_with_profile, unique_name};
+use dialog_search_tree::{ContentAddressedStorage, Traversable as _, Visit};
+use dialog_storage::provider::storage::VolatileSpace;
+use futures_util::{StreamExt as _, stream};
+
+use crate::{
+    Branch, CommitError, Index, LoadRepositoryError, NetworkedIndex, OpenRepositoryError,
+    Repository, RepositoryExt as _, RepositorySealError, SealKey,
+};
+
+fn key(byte: u8) -> SealKey {
+    SealKey::from([byte; 32])
+}
+
+fn space(profile: &Profile, name: &str) -> SpaceHandle {
+    SpaceHandle {
+        profile_did: dialog_varsig::Principal::did(profile),
+        name: name.to_string(),
+    }
+}
+
+fn note(index: usize, body: &str) -> Result<Instruction> {
+    Ok(Instruction::Assert(Artifact {
+        the: "note/body".parse()?,
+        of: format!("note:{index}").parse()?,
+        is: Value::String(body.to_string()),
+        cause: None,
+    }))
+}
+
+async fn commit_notes(
+    branch: &Branch,
+    operator: &Operator<VolatileSpace>,
+    marker: &str,
+) -> Result<()> {
+    let notes = (0..200)
+        .map(|index| note(index, &format!("{index} {marker}")))
+        .collect::<Result<Vec<_>>>()?;
+    branch.commit(stream::iter(notes)).perform(operator).await?;
+    Ok(())
+}
+
+async fn read_notes(branch: &Branch, operator: &Operator<VolatileSpace>) -> Result<Vec<Artifact>> {
+    let notes = branch
+        .claims()
+        .select(ArtifactSelector::new().the("note/body".parse()?))
+        .to_owned()
+        .perform(operator)
+        .await?
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(notes)
+}
+
+/// Every block of the tree the branch's head names, as stored.
+async fn stored_tree_blocks<C: dialog_varsig::Principal>(
+    operator: &Operator<VolatileSpace>,
+    repository: &Repository<C>,
+    branch: &Branch,
+) -> Result<Vec<Vec<u8>>> {
+    let catalog = ArchiveScope::new(repository.subject()).index();
+    let index = NetworkedIndex::new(operator, catalog, None, repository.codec().clone());
+    let storage = ContentAddressedStorage::new(TreeStorageBridge(index));
+    let root = branch.revision().expect("the branch has a commit").tree;
+    let tree = Index::from_hash(NodeHash::from(*root.hash()));
+    let mut blocks = Vec::new();
+    let visits = tree.traverse_available(&storage);
+    futures_util::pin_mut!(visits);
+    while let Some(visit) = visits.next().await {
+        let Visit::Present(node) = visit? else {
+            panic!("a local repository holds its whole tree");
+        };
+        blocks.push(node.buffer().as_ref().to_vec());
+    }
+    Ok(blocks)
+}
+
+fn contains(haystack: &[u8], needle: &str) -> bool {
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle.as_bytes())
+}
+
+/// What a sealed repository commits reads back through a fresh load of the
+/// repository with the same key.
+#[dialog_common::test]
+async fn it_reads_back_what_a_sealed_repository_commits() -> Result<()> {
+    let (operator, profile) = test_operator_with_profile().await;
+    let name = unique_name("sealed");
+    let repository = space(&profile, &name)
+        .create()
+        .sealed(key(1))
+        .perform(&operator)
+        .await?;
+    assert!(repository.codec().is_sealed());
+    let branch = repository.branch("main").open().perform(&operator).await?;
+    commit_notes(&branch, &operator, "first").await?;
+
+    let reloaded = space(&profile, &name)
+        .load()
+        .sealed(key(1))
+        .perform(&operator)
+        .await?;
+    let branch = reloaded.branch("main").open().perform(&operator).await?;
+    let notes = read_notes(&branch, &operator).await?;
+    assert_eq!(notes.len(), 200);
+    assert!(
+        notes
+            .iter()
+            .any(|note| note.is == Value::String("7 first".into()))
+    );
+
+    // A second commit on the reloaded handle builds on the sealed tree.
+    branch
+        .commit(stream::iter(vec![note(500, "second")?]))
+        .perform(&operator)
+        .await?;
+    assert_eq!(read_notes(&branch, &operator).await?.len(), 201);
+    Ok(())
+}
+
+/// Every tree block of a sealed repository is stored sealed, and no fact
+/// value appears in it. The same commit in a plain repository shows the
+/// value, which shows the scan finds it.
+#[dialog_common::test]
+async fn it_stores_only_sealed_tree_blocks() -> Result<()> {
+    let (operator, profile) = test_operator_with_profile().await;
+    let marker = unique_name("plaintext-marker");
+
+    let sealed = space(&profile, &unique_name("sealed"))
+        .create()
+        .sealed(key(1))
+        .perform(&operator)
+        .await?;
+    let branch = sealed.branch("main").open().perform(&operator).await?;
+    commit_notes(&branch, &operator, &marker).await?;
+    let blocks = stored_tree_blocks(&operator, &sealed, &branch).await?;
+    assert!(blocks.len() > 1, "the tree spans several blocks");
+    for block in &blocks {
+        assert!(block.starts_with(&SEALED_BLOCK_MAGIC));
+        assert!(!contains(block, &marker));
+    }
+
+    let plain = space(&profile, &unique_name("plain"))
+        .create()
+        .perform(&operator)
+        .await?;
+    let branch = plain.branch("main").open().perform(&operator).await?;
+    commit_notes(&branch, &operator, &marker).await?;
+    let blocks = stored_tree_blocks(&operator, &plain, &branch).await?;
+    assert!(blocks.iter().any(|block| contains(block, &marker)));
+    Ok(())
+}
+
+/// A sealed repository opens only with its key, and a plain one only
+/// without a key.
+#[dialog_common::test]
+async fn it_opens_a_sealed_repository_only_with_its_key() -> Result<()> {
+    let (operator, profile) = test_operator_with_profile().await;
+    let sealed = unique_name("sealed");
+    space(&profile, &sealed)
+        .create()
+        .sealed(key(1))
+        .perform(&operator)
+        .await?;
+
+    let without_key = space(&profile, &sealed).load().perform(&operator).await;
+    assert!(matches!(
+        without_key,
+        Err(LoadRepositoryError::Seal(RepositorySealError::KeyRequired))
+    ));
+    let wrong_key = space(&profile, &sealed)
+        .load()
+        .sealed(key(2))
+        .perform(&operator)
+        .await;
+    assert!(matches!(
+        wrong_key,
+        Err(LoadRepositoryError::Seal(RepositorySealError::WrongKey))
+    ));
+    let opened_without_key = space(&profile, &sealed).open().perform(&operator).await;
+    assert!(matches!(
+        opened_without_key,
+        Err(OpenRepositoryError::Seal(RepositorySealError::KeyRequired))
+    ));
+    let opened = space(&profile, &sealed)
+        .open()
+        .sealed(key(1))
+        .perform(&operator)
+        .await?;
+    assert!(opened.codec().is_sealed());
+
+    let plain = unique_name("plain");
+    space(&profile, &plain).create().perform(&operator).await?;
+    let with_key = space(&profile, &plain)
+        .load()
+        .sealed(key(1))
+        .perform(&operator)
+        .await;
+    assert!(matches!(
+        with_key,
+        Err(LoadRepositoryError::Seal(RepositorySealError::NotSealed))
+    ));
+    assert!(
+        !space(&profile, &plain)
+            .load()
+            .perform(&operator)
+            .await?
+            .codec()
+            .is_sealed()
+    );
+    Ok(())
+}
+
+/// Opening a missing repository with a key creates it sealed under that
+/// key.
+#[dialog_common::test]
+async fn it_creates_a_sealed_repository_on_open() -> Result<()> {
+    let (operator, profile) = test_operator_with_profile().await;
+    let name = unique_name("sealed");
+    let created = space(&profile, &name)
+        .open()
+        .sealed(key(3))
+        .perform(&operator)
+        .await?;
+    assert!(created.codec().is_sealed());
+    let reloaded = space(&profile, &name).load().perform(&operator).await;
+    assert!(matches!(
+        reloaded,
+        Err(LoadRepositoryError::Seal(RepositorySealError::KeyRequired))
+    ));
+    Ok(())
+}
+
+/// A value too large to stay inside a tree node is refused by a sealed
+/// repository instead of being stored unsealed.
+#[dialog_common::test]
+async fn it_refuses_a_value_that_would_leave_the_sealed_tree() -> Result<()> {
+    let (operator, profile) = test_operator_with_profile().await;
+    let repository = space(&profile, &unique_name("sealed"))
+        .create()
+        .sealed(key(1))
+        .perform(&operator)
+        .await?;
+    let branch = repository.branch("main").open().perform(&operator).await?;
+    let large = "x".repeat(dialog_search_tree::Manifest::default().inline_n as usize + 1);
+    let result = branch
+        .commit(stream::iter(vec![note(0, &large)?]))
+        .perform(&operator)
+        .await;
+    assert!(
+        matches!(
+            result,
+            Err(CommitError::Artifact(DialogArtifactsError::SealedSpill(_)))
+        ),
+        "{result:?}"
+    );
+    assert!(branch.revision().is_none());
+    Ok(())
+}

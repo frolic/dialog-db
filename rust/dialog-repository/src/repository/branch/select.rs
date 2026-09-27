@@ -8,7 +8,7 @@ use dialog_common::ConditionalSync;
 use dialog_effects::archive::{Get, Put};
 use dialog_effects::memory::Resolve;
 use dialog_search_tree::{Buffer, DialogSearchTreeError};
-use dialog_storage::{Blake3Hash, DialogStorageError, StorageBackend};
+use dialog_storage::{Blake3Hash, BlockCodec, DialogStorageError, StorageBackend};
 use futures_util::Stream;
 
 use dialog_effects::archive::prelude::{ArchiveScope, CatalogScope};
@@ -44,6 +44,11 @@ impl<'a> Select<'a> {
     /// The catalog (archive index) scoped to this line's subject.
     pub fn catalog(&self) -> CatalogScope {
         ArchiveScope::new(self.source.subject()).index()
+    }
+
+    /// The codec the selected line's tree blocks are encoded with.
+    pub fn codec(&self) -> BlockCodec {
+        self.source.codec()
     }
 }
 
@@ -93,7 +98,7 @@ impl Select<'_> {
         // query, but a read that misses fails with the load failure as
         // its cause instead of a bare not-found.
         let remote = self.source.fallback(env).await;
-        let store = NetworkedIndex::new(env, self.catalog(), remote);
+        let store = NetworkedIndex::new(env, self.catalog(), remote, self.codec());
         self.execute(store).await
     }
 
@@ -170,7 +175,7 @@ impl Select<'_> {
             + 'static,
     {
         let remote = self.source.fallback(env).await;
-        let store = NetworkedIndex::new(env, self.catalog(), remote);
+        let store = NetworkedIndex::new(env, self.catalog(), remote, self.codec());
         self.estimate(store).await
     }
 
@@ -257,6 +262,11 @@ impl SelectOwned<'_> {
         self.0.catalog()
     }
 
+    /// The codec the selected line's tree blocks are encoded with.
+    pub fn codec(&self) -> BlockCodec {
+        self.0.codec()
+    }
+
     /// [`Select::perform`], with every row materialized from the scan's
     /// own key parse (see [`Select::execute_owned`]).
     pub async fn perform<Env>(
@@ -275,7 +285,7 @@ impl SelectOwned<'_> {
         // The same remote fallback as `Select::perform`; see the comment
         // there.
         let remote = self.0.source.fallback(env).await;
-        let store = NetworkedIndex::new(env, self.catalog(), remote);
+        let store = NetworkedIndex::new(env, self.catalog(), remote, self.codec());
         self.execute(store).await
     }
 

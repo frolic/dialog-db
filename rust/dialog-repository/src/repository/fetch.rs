@@ -245,7 +245,8 @@ where
     }
     let remote = fallback.await;
     let catalog = ArchiveScope::new(source.as_ref().subject()).index();
-    let store = NetworkedIndex::new(env, catalog, remote).with_priority(likelihood.into());
+    let store = NetworkedIndex::new(env, catalog, remote, source.as_ref().codec())
+        .with_priority(likelihood.into());
     let store = CacheThrough {
         cache: source.as_ref().node_cache(),
         store,

@@ -79,6 +79,10 @@ pub enum OpenRepositoryError {
     /// Backend storage failed during load-or-create.
     #[error("Storage failed during open: {0}")]
     Storage(#[from] StorageError),
+
+    /// The repository's seal does not match the key the caller gave.
+    #[error(transparent)]
+    Seal(#[from] RepositorySealError),
 }
 
 /// Errors returned by the load repository command.
@@ -87,6 +91,10 @@ pub enum LoadRepositoryError {
     /// Backend storage failed during load.
     #[error("Storage failed during load: {0}")]
     Storage(#[from] StorageError),
+
+    /// The repository's seal does not match the key the caller gave.
+    #[error(transparent)]
+    Seal(#[from] RepositorySealError),
 }
 
 /// Errors returned by the create repository command.
@@ -99,6 +107,37 @@ pub enum CreateRepositoryError {
     /// Backend storage failed during create.
     #[error("Storage failed during create: {0}")]
     Storage(#[from] StorageError),
+
+    /// Recording the new repository's seal failed.
+    #[error(transparent)]
+    Seal(#[from] RepositorySealError),
+}
+
+/// Why a repository's seal refused a caller.
+///
+/// A repository is sealed or plain from creation, and is opened with the
+/// codec it was created with.
+#[derive(Error, Debug)]
+pub enum RepositorySealError {
+    /// The repository is sealed and no key was given.
+    #[error("The repository is sealed; open it with its seal key")]
+    KeyRequired,
+
+    /// A key was given for a repository that is not sealed.
+    #[error("The repository is not sealed; open it without a seal key")]
+    NotSealed,
+
+    /// The key given is not the key the repository was sealed with.
+    #[error("The seal key is not the key this repository was sealed with")]
+    WrongKey,
+
+    /// Reading the recorded seal failed.
+    #[error("Failed to read the repository's seal: {0}")]
+    Resolve(#[from] ResolveError),
+
+    /// Recording the seal failed.
+    #[error("Failed to record the repository's seal: {0}")]
+    Publish(#[from] PublishError),
 }
 
 /// Errors returned by the create remote command.

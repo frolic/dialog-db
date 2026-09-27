@@ -458,7 +458,7 @@ where
         // Concurrent reads of one digest share fetch-and-hydrate through
         // the env's own `Hydrate` flight (see `crate::Hydrate`), with
         // every other evaluation in the process.
-        let store = NetworkedIndex::new(env, select.catalog(), remote);
+        let store = NetworkedIndex::new(env, select.catalog(), remote, select.codec());
         let stream = select.execute(store).await?;
         for await artifact in stream {
             yield artifact?;
@@ -568,7 +568,7 @@ where
         for source in &self.sources {
             let select = crate::Select::from_source(source.as_ref(), input.clone());
             let remote = source.as_ref().fallback(self.env).await;
-            let store = NetworkedIndex::new(self.env, select.catalog(), remote);
+            let store = NetworkedIndex::new(self.env, select.catalog(), remote, select.codec());
             if let Some(estimate) = select.estimate(store).await? {
                 total = Some(total.unwrap_or(0).saturating_add(estimate));
             }
@@ -624,7 +624,8 @@ where
         for source in &self.sources {
             let source = source.as_ref();
             let remote = source.fallback(self.env).await;
-            let store = NetworkedIndex::new(self.env, source.archive().index(), remote);
+            let store =
+                NetworkedIndex::new(self.env, source.archive().index(), remote, source.codec());
             let cached = source
                 .node_cache()
                 .get_or_fetch(&NodeHash::from(input), async |hash| {
