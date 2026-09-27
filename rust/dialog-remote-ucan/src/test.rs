@@ -6,6 +6,8 @@
 #[cfg(target_arch = "wasm32")]
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_dedicated_worker);
 
+mod public;
+
 use crate::helpers::{MemoryStore, UcanServiceAddress};
 use crate::{
     Access, Answer, Content, Payload, Request, UcanAddress, UcanAuthorization, UcanSite, credential,

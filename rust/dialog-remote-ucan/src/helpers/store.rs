@@ -57,6 +57,29 @@ impl MemoryStore {
     pub fn blobs(&self) -> usize {
         self.inner.lock().expect("store lock").blobs.len()
     }
+
+    /// The bytes a public read of `catalog` names: a block of that
+    /// catalog, or a blob when the catalog is `blob`. The digest is the
+    /// base58 name the read's URL carries.
+    pub fn public(&self, subject: &str, catalog: &str, name: &str) -> Option<Vec<u8>> {
+        let inner = self.inner.lock().expect("store lock");
+        if catalog == "blob" {
+            return inner
+                .blobs
+                .iter()
+                .find(|((owner, digest), _)| {
+                    owner == subject && digest.as_bytes().to_base58() == name
+                })
+                .map(|(_, bytes)| bytes.clone());
+        }
+        inner
+            .blocks
+            .iter()
+            .find(|((owner, held, digest), _)| {
+                owner == subject && held == catalog && digest.as_bytes().to_base58() == name
+            })
+            .map(|(_, bytes)| bytes.clone())
+    }
 }
 
 fn block_key<V, Fx>(capability: &Capability<Fx>, digest: Blake3Hash) -> (String, String, Blake3Hash)
