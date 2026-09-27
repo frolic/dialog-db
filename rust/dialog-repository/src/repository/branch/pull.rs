@@ -19,7 +19,7 @@ use futures_util::future::Either;
 
 use crate::{
     Branch, Checkpoint, EMPTY_TREE_HASH, Index, NetworkedIndex, PublishError, PullError,
-    RemoteSite, RepositoryMemoryExt, Revision, TreeReference, Upstream, UpstreamBranch,
+    RemoteSite, RepositoryMemoryExt, Revision, TreeReference, Upstream, UpstreamBranch, prefetch,
 };
 
 /// Below this divergence mass (summed edition excess, roughly commits),
@@ -32,11 +32,16 @@ pub(crate) const SMALL_DIVERGENCE: u64 = 8;
 pub struct Pull<'a> {
     branch: &'a Branch,
     from: Option<Upstream>,
+    fetched: bool,
 }
 
 impl<'a> Pull<'a> {
     fn new(branch: &'a Branch) -> Self {
-        Self { branch, from: None }
+        Self {
+            branch,
+            from: None,
+            fetched: false,
+        }
     }
 
     /// The branch this pull targets.
@@ -59,6 +64,21 @@ impl<'a> Pull<'a> {
     /// default upstream — so the next pull from it is incremental.
     pub fn from(mut self, source: impl Into<UpstreamBranch>) -> Self {
         self.from = Some(Upstream::from(source.into()));
+        self
+    }
+
+    /// Merge the remote head the last fetch brought, and read no head
+    /// from the remote.
+    ///
+    /// A caller that read many heads at once, as one request, writes each
+    /// into its remote branch ([`RemoteBranch::fetch`] keeps what it
+    /// read) and pulls each with this, so no pull pays a round trip for
+    /// its head again. A local upstream has no fetch, so this changes
+    /// nothing for one.
+    ///
+    /// [`RemoteBranch::fetch`]: crate::RemoteBranch::fetch
+    pub fn fetched(mut self) -> Self {
+        self.fetched = true;
         self
     }
 }
@@ -92,6 +112,7 @@ impl<'a> Pull<'a> {
     /// #         + dialog_capability::Provider<dialog_effects::memory::Publish>
     /// #         + dialog_capability::Provider<dialog_effects::authority::Identify>
     /// #         + dialog_capability::Provider<dialog_effects::authority::Attest>
+    /// #         + dialog_capability::Provider<dialog_repository::Hydrate>
     /// #         + dialog_capability::Provider<dialog_capability::Fork<dialog_repository::RemoteSite, dialog_effects::archive::Get>>
     /// #         + dialog_capability::Provider<dialog_capability::Fork<dialog_repository::RemoteSite, dialog_effects::memory::Resolve>>
     /// #         + dialog_common::ConditionalSync
@@ -143,6 +164,7 @@ impl<'a> Pull<'a> {
             + 'static,
     {
         let branch = self.branch;
+        let fetched = self.fetched;
 
         // Select the upstream entry to pull from: the default when no
         // explicit source was given, otherwise the tracked entry for that
@@ -196,7 +218,12 @@ impl<'a> Pull<'a> {
                     .open()
                     .perform(env)
                     .await?;
-                (upstream.fetch().perform(env).await?, Some(remote))
+                let revision = if fetched {
+                    upstream.revision()
+                } else {
+                    upstream.fetch().perform(env).await?
+                };
+                (revision, Some(remote))
             }
         };
 
@@ -225,6 +252,13 @@ impl<'a> Pull<'a> {
 
         if base == upstream_revision.tree {
             return Ok(PreparedPull::NoOp);
+        }
+
+        // The head names the top of its tree. Fetch it with the root, all
+        // at once, before anything below walks the tree one level at a
+        // time.
+        if let Some(remote) = &remote {
+            prefetch(env, remote, &branch.archive().index(), &upstream_revision).await;
         }
 
         // Checkpoint the head cell up front, capturing the version we read the
@@ -2243,6 +2277,7 @@ mod history_tests {
             edition: Edition::GENESIS,
             context: None,
             signature: Vec::new(),
+            prefetch: Vec::new(),
         };
         evil.reset(forged).perform(&operator).await?;
 

@@ -23,7 +23,7 @@ use futures_util::{StreamExt as _, TryStreamExt as _, stream};
 
 use crate::{
     Branch, Index, LocalIndex, PublishError, PushError, RemoteArchiveIndex, RemoteRepository,
-    RemoteSite, RepositoryMemoryExt, Revision, Upstream, UpstreamBranch,
+    RemoteSite, RepositoryMemoryExt, Revision, Upstream, UpstreamBranch, name_prefetch,
 };
 
 /// Command struct for pushing local changes to an upstream branch.
@@ -456,7 +456,12 @@ impl Push<'_> {
                     pending = rest;
                 }
 
-                upstream.publish(revision.clone()).perform(env).await?;
+                // The head names the top of its tree, so a reader that
+                // holds none of it fetches the top in one round trip.
+                let mut published = revision.clone();
+                published.prefetch =
+                    name_prefetch(&NodeHash::from(*revision.tree.hash()), &tree_store).await?;
+                upstream.publish(published).perform(env).await?;
             }
         }
 

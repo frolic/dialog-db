@@ -56,6 +56,9 @@ mod metadata;
 mod open;
 pub use open::*;
 
+mod prefetch;
+pub use prefetch::*;
+
 mod pull;
 pub use pull::*;
 

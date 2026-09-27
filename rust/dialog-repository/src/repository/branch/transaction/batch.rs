@@ -394,7 +394,7 @@ impl TransactionCommit<&Branch> {
                 snapshot: Snapshot::staged(
                     branch.subject(),
                     branch.codec().clone(),
-                    tip,
+                    *tip,
                     caches,
                     line,
                 ),

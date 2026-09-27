@@ -1332,6 +1332,134 @@ async fn it_pushes_and_pulls_data_between_repos(s3: S3Address) -> Result<()> {
     Ok(())
 }
 
+/// A pushed head names the top of its tree, and a pull brings the root
+/// into the local archive before any query reads it. A pull marked
+/// `fetched` merges the head the last fetch brought and reads no head.
+#[dialog_common::test]
+async fn it_prefetches_the_named_top_and_merges_a_fetched_head(s3: S3Address) -> Result<()> {
+    let (operator, profile) = test_operator_with_profile().await;
+    let (alice_repo, alice_branch) =
+        setup_repo_with_s3_remote(&operator, &profile, &s3, "alice-prefetch").await?;
+    let note = |entity: &str, body: &str| -> Result<Instruction> {
+        Ok(Instruction::Assert(Artifact {
+            the: "note/body".parse()?,
+            of: entity.parse()?,
+            is: Value::String(body.into()),
+            cause: None,
+        }))
+    };
+    alice_branch
+        .commit(stream::iter(vec![note("note:1", "first")?]))
+        .perform(&operator)
+        .await?;
+    let pushed = alice_branch
+        .push()
+        .perform(&operator)
+        .await?
+        .context("alice pushed")?;
+
+    // The head on the remote names what the writer's tree has below its root.
+    let alice_origin = alice_repo
+        .remote("origin")
+        .load()
+        .perform(&operator)
+        .await?;
+    let published = alice_origin
+        .branch("main")
+        .open()
+        .perform(&operator)
+        .await?
+        .fetch()
+        .perform(&operator)
+        .await?
+        .context("the remote has a head")?;
+    let storage = TreeStorage::new(TreeStorageBridge(crate::LocalIndex::new(
+        &operator,
+        alice_branch.archive().index(),
+        alice_branch.codec().clone(),
+    )));
+    assert_eq!(published.tree, pushed.tree);
+    assert_eq!(
+        published.prefetch,
+        crate::name_prefetch(&NodeHash::from(*pushed.tree.hash()), &storage).await?
+    );
+
+    let bob_repo = profile
+        .repository(unique_name("bob-prefetch"))
+        .open()
+        .perform(&operator)
+        .await?;
+    let origin = bob_repo
+        .remote("origin")
+        .create(s3_site_address(&s3))
+        .subject(alice_repo.did())
+        .perform(&operator)
+        .await?;
+    let bob_branch = bob_repo.branch("main").open().perform(&operator).await?;
+    let remote_branch = origin.branch("main").open().perform(&operator).await?;
+    bob_branch
+        .set_upstream(remote_branch)
+        .perform(&operator)
+        .await?;
+    assert!(bob_branch.pull().perform(&operator).await?.is_some());
+    for digest in [*pushed.tree.hash()].into_iter().chain(published.prefetch) {
+        let block = bob_branch
+            .archive()
+            .index()
+            .get(NodeHash::from(digest))
+            .perform(&operator)
+            .await?;
+        assert!(
+            block.is_some(),
+            "the pull brought the root and each named block before any query"
+        );
+    }
+
+    // A newer head lands on the remote. A fetched pull merges only what
+    // the last fetch brought, so it sees nothing new until a fetch.
+    alice_branch
+        .commit(stream::iter(vec![note("note:2", "second")?]))
+        .perform(&operator)
+        .await?;
+    alice_branch.push().perform(&operator).await?;
+    assert!(
+        bob_branch
+            .pull()
+            .fetched()
+            .perform(&operator)
+            .await?
+            .is_none(),
+        "a fetched pull reads no head"
+    );
+    // A handle opened now reads the cache the pull wrote.
+    origin
+        .branch("main")
+        .open()
+        .perform(&operator)
+        .await?
+        .fetch()
+        .perform(&operator)
+        .await?;
+    assert!(
+        bob_branch
+            .pull()
+            .fetched()
+            .perform(&operator)
+            .await?
+            .is_some()
+    );
+    let notes = bob_branch
+        .claims()
+        .select(ArtifactSelector::new().the("note/body".parse()?))
+        .to_owned()
+        .perform(&operator)
+        .await?
+        .collect::<Vec<_>>()
+        .await;
+    assert_eq!(notes.len(), 2);
+    Ok(())
+}
+
 /// A retraction must survive a concurrent three-way pull.
 ///
 /// The resurrection scenario observed in the wild: Alice and Bob share
