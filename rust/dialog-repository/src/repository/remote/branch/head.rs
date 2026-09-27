@@ -7,6 +7,11 @@
 //! holds no key yet fetches them while it reads the key. The issuer, the
 //! branch, the edition, the causal context, and the signature are sealed
 //! under the branch's key. A plain branch's head is stored as it is.
+//!
+//! A sealed branch reads a plain head too: a remote keeps the last head a
+//! build that stored heads plain wrote, until the next push replaces it. The
+//! head's signature is checked either way, and a remote can already serve any
+//! older head, so a plain head gives a remote no new power.
 
 use std::fmt::Debug;
 use std::mem::take;
@@ -115,7 +120,9 @@ impl Encoder for HeadCodec {
         if !self.0.is_sealed() {
             return CborEncoder.decode(bytes).await;
         }
-        let head: SealedHead = CborEncoder.decode(bytes).await?;
+        let Ok(head) = CborEncoder.decode::<SealedHead>(bytes).await else {
+            return CborEncoder.decode(bytes).await;
+        };
         let inner = self
             .0
             .decode(Buffer::from(head.sealed))
@@ -190,6 +197,15 @@ mod tests {
         );
         let opened: Revision = sealed().decode(&stored).await?;
         assert_eq!(opened, revision);
+        Ok(())
+    }
+
+    #[dialog_common::test]
+    async fn it_reads_a_plain_head_on_a_sealed_branch() -> Result<()> {
+        let revision = head()?;
+        let (_, plain) = CborEncoder.encode(&revision).await?;
+        let read: Revision = sealed().decode(&plain).await?;
+        assert_eq!(read, revision);
         Ok(())
     }
 
