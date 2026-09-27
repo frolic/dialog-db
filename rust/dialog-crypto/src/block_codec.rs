@@ -52,6 +52,16 @@ impl BlockCodec {
         matches!(self, Self::Sealed(_))
     }
 
+    /// The identifier of the key new blocks are sealed under, or `None` for
+    /// a plain codec. A store records it to tell a matching key from
+    /// another one without keeping the key.
+    pub fn key_id(&self) -> Option<KeyId> {
+        match self {
+            Self::Plain => None,
+            Self::Sealed(codec) => Some(codec.ring.current_keys().id),
+        }
+    }
+
     /// The stored form of `plaintext`.
     ///
     /// A sealed block remembers the plaintext it was sealed from, so reading
@@ -96,6 +106,24 @@ impl BlockCodec {
         }
     }
 }
+
+/// Two codecs are equal when they write the same bytes for every block: both
+/// plain, or both sealing under the same key, generation, and padding.
+impl PartialEq for BlockCodec {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Plain, Self::Plain) => true,
+            (Self::Sealed(left), Self::Sealed(right)) => {
+                left.ring.current() == right.ring.current()
+                    && left.ring.current_keys().id == right.ring.current_keys().id
+                    && left.padding == right.padding
+            }
+            _ => false,
+        }
+    }
+}
+
+impl Eq for BlockCodec {}
 
 impl SealedCodec {
     fn open(&self, block: &Buffer) -> Result<Buffer, SealError> {
@@ -158,6 +186,16 @@ mod tests {
             sealed(1).decode(Buffer::from(b"plain bytes".as_slice())),
             Err(SealError::NotSealed)
         );
+    }
+
+    #[dialog_common::test]
+    fn it_compares_codecs_by_the_blocks_they_write() {
+        assert_eq!(BlockCodec::Plain, BlockCodec::default());
+        assert_eq!(sealed(1), sealed(1));
+        assert_ne!(sealed(1), sealed(2));
+        assert_ne!(sealed(1), BlockCodec::Plain);
+        assert_eq!(BlockCodec::Plain.key_id(), None);
+        assert_eq!(sealed(1).key_id(), Some(SealKey::from([1; 32]).id()));
     }
 
     #[dialog_common::test]

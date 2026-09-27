@@ -12,7 +12,7 @@ use dialog_crypto::{KeyRing, SEALED_BLOCK_MAGIC, SealError, SealKey};
 use dialog_search_tree::{
     BlockCodec, ContentAddressedStorage, DialogSearchTreeError, PersistentTree, TreeDifference,
 };
-use dialog_storage::{MemoryStorageBackend, StorageSource};
+use dialog_storage::{DialogStorageError, MemoryStorageBackend, StorageBackend, StorageSource};
 use futures_util::{StreamExt, TryStreamExt};
 
 type Backend = MemoryStorageBackend<Blake3Hash, Vec<u8>>;
@@ -221,5 +221,69 @@ async fn it_syncs_and_merges_sealed_replicas() -> Result<()> {
         .try_collect()
         .await?;
     assert_eq!(merged.len(), 1200);
+    Ok(())
+}
+
+/// A backend over a sealed space: it names its codec, and stores nothing
+/// else differently.
+#[derive(Clone)]
+struct SealedSpace {
+    blocks: Backend,
+    codec: BlockCodec,
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+impl StorageBackend for SealedSpace {
+    type Key = Blake3Hash;
+    type Value = Vec<u8>;
+    type Error = DialogStorageError;
+
+    async fn set(&mut self, key: Self::Key, value: Self::Value) -> Result<(), Self::Error> {
+        self.blocks.set(key, value).await
+    }
+
+    async fn get(&self, key: &Self::Key) -> Result<Option<Self::Value>, Self::Error> {
+        self.blocks.get(key).await
+    }
+
+    fn block_codec(&self) -> BlockCodec {
+        self.codec.clone()
+    }
+}
+
+/// Storage over a backend that names a codec seals with it, so a caller
+/// that holds only the backend reads and writes the space correctly.
+#[dialog_common::test]
+async fn it_takes_the_codec_from_the_backend() -> Result<()> {
+    let space = SealedSpace {
+        blocks: Backend::default(),
+        codec: sealed(1),
+    };
+    let mut storage = ContentAddressedStorage::new(space.clone());
+    assert_eq!(storage.codec(), &sealed(1));
+
+    let mut edit = Tree::empty().edit();
+    edit = edit.insert(1u32.to_be_bytes(), value(1), &storage).await?;
+    let mut delta = storage.delta();
+    let tree = edit.persist(&mut delta)?;
+    for (hash, block) in delta.flush() {
+        storage.store(block.as_ref().to_vec(), &hash).await?;
+    }
+
+    let blocks: Vec<(Blake3Hash, Vec<u8>)> = space.blocks.read().try_collect().await?;
+    assert!(!blocks.is_empty());
+    assert!(
+        blocks
+            .iter()
+            .all(|(_, bytes)| bytes.starts_with(&SEALED_BLOCK_MAGIC))
+    );
+    let reader = ContentAddressedStorage::new(space);
+    assert_eq!(
+        Tree::from_hash(tree.root().clone())
+            .get(&1u32.to_be_bytes(), &reader)
+            .await?,
+        Some(value(1))
+    );
     Ok(())
 }

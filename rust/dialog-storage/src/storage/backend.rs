@@ -5,6 +5,7 @@ use dialog_common::{ConditionalSend, ConditionalSync};
 use tokio::sync::Mutex;
 
 use crate::DialogStorageError;
+use dialog_crypto::BlockCodec;
 
 mod memory;
 pub use memory::*;
@@ -35,6 +36,16 @@ pub trait StorageBackend: Clone {
     async fn set(&mut self, key: Self::Key, value: Self::Value) -> Result<(), Self::Error>;
     /// Retrieve a value (if any) stored against the given key
     async fn get(&self, key: &Self::Key) -> Result<Option<Self::Value>, Self::Error>;
+
+    /// How the blocks this backend holds are encoded.
+    ///
+    /// A tree reads and writes its nodes through this codec, so a backend
+    /// over a sealed space names the space's codec here and every tree over
+    /// it seals and opens with the same key. A wrapper forwards its inner
+    /// backend's codec.
+    fn block_codec(&self) -> BlockCodec {
+        BlockCodec::Plain
+    }
 }
 
 /// A [TransactionalMemoryBackend] provides compare-and-swap (CAS) semantics
@@ -122,6 +133,10 @@ where
 
     async fn get(&self, key: &Self::Key) -> Result<Option<Self::Value>, Self::Error> {
         (*self).get(key).await
+    }
+
+    fn block_codec(&self) -> BlockCodec {
+        (**self).block_codec()
     }
 }
 

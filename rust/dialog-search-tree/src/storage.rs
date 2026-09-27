@@ -22,14 +22,15 @@ where
     Backend: StorageBackend<Key = Blake3Hash, Value = Vec<u8>, Error = DialogStorageError>
         + ConditionalSend,
 {
-    /// Creates a new content-addressed storage wrapper whose blocks are
-    /// stored plain.
+    /// Creates a content-addressed storage wrapper whose blocks are encoded
+    /// with the backend's own [`StorageBackend::block_codec`].
     pub fn new(backend: Backend) -> Self {
-        Self::encoded_with(backend, BlockCodec::Plain)
+        let codec = backend.block_codec();
+        Self::encoded_with(backend, codec)
     }
 
-    /// Creates a new content-addressed storage wrapper whose blocks are
-    /// stored with `codec`.
+    /// Creates a content-addressed storage wrapper whose blocks are encoded
+    /// with `codec`, whatever the backend names.
     pub fn encoded_with(backend: Backend, codec: BlockCodec) -> Self {
         Self { backend, codec }
     }

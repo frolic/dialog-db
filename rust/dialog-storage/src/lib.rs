@@ -43,6 +43,8 @@ pub mod dup_audit;
 mod encoder;
 pub use encoder::*;
 
+pub use dialog_crypto::BlockCodec;
+
 mod error;
 pub use error::*;
 

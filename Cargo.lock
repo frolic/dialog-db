@@ -1713,6 +1713,7 @@ dependencies = [
  "dialog-capability",
  "dialog-common",
  "dialog-credentials",
+ "dialog-crypto",
  "dialog-effects",
  "dialog-varsig",
  "dirs",

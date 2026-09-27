@@ -359,6 +359,10 @@ where
     type Value = Backend::Value;
     type Error = Backend::Error;
 
+    fn block_codec(&self) -> dialog_crypto::BlockCodec {
+        self.backend.block_codec()
+    }
+
     async fn set(&mut self, key: Self::Key, value: Self::Value) -> Result<(), Self::Error> {
         // Record the write operation
         self.state.write().unwrap().push(JournalEntry {
