@@ -7,6 +7,10 @@
 //! other fact. [`revoke`] signs a revocation and returns the fact that stores
 //! it. [`BranchRevocations`] answers a verifier from that branch.
 //!
+//! A revocation fact holds the signed `/ucan/revoke` invocation and names
+//! the revoked delegation by its CID only. The verifier holds the
+//! delegation in the chain it checks, so a copy on the branch adds no proof.
+//!
 //! The branch is data, and anyone who can write the branch can write a fact
 //! on it. So a stored revocation counts only when its signature verifies and
 //! its signer may revoke the delegation it names: an issuer at or above that
@@ -14,7 +18,6 @@
 
 use std::collections::HashMap;
 use std::fmt::Display;
-use std::sync::Arc;
 
 use dialog_artifacts::tree::{ArtifactTreeExt as _, SpillCache};
 use dialog_artifacts::{
@@ -29,7 +32,7 @@ use dialog_effects::archive::prelude::ArchiveScope;
 use dialog_effects::archive::{Get, Put};
 use dialog_effects::memory::Resolve;
 use dialog_ucan_core::revocation::{RevocationChecker, RevocationMatch, RevocationSelector};
-use dialog_ucan_core::{Delegation, InvocationChain, RevocationBuilder, RevocationChain};
+use dialog_ucan_core::{Delegation, Invocation, Revocation, RevocationBuilder};
 use dialog_varsig::{AnySignature, Did, Principal, Signer};
 use futures_util::StreamExt as _;
 use ipld_core::cid::Cid;
@@ -37,9 +40,9 @@ use thiserror::Error;
 
 use crate::{BranchReference, Index, LocalIndex};
 
-/// The attribute a revocation is stored under. Its value is the revocation
-/// container: the signed `/ucan/revoke` invocation and the delegation it
-/// names.
+/// The attribute a revocation is stored under. Its value is the signed
+/// `/ucan/revoke` invocation in DAG-CBOR, which names the revoked
+/// delegation by its CID.
 pub const REVOCATION_ATTRIBUTE: &str = "ucan/revocation";
 
 /// The entity every revocation of `delegation` is stored under.
@@ -74,12 +77,8 @@ where
         .try_build()
         .await
         .map_err(|error| failed(&error))?;
-    let chain = RevocationChain::assemble(
-        revocation,
-        HashMap::from([(revoked, Arc::new(delegation.clone()))]),
-    )
-    .map_err(|error| failed(&error))?;
-    let bytes = chain.to_bytes().map_err(|error| failed(&error))?;
+    let bytes =
+        serde_ipld_dagcbor::to_vec(revocation.invocation()).map_err(|error| failed(&error))?;
     Ok(Instruction::Assert(Artifact {
         the: attribute(),
         of: revocation_entity(&revoked).map_err(|error| failed(&error))?,
@@ -160,19 +159,20 @@ impl BranchRevocations {
     }
 }
 
-/// The match a stored revocation makes, when it names `delegation`, its
-/// signer is one of `by`, and its signature verifies.
+/// The match a stored revocation makes, when it is a `/ucan/revoke`
+/// invocation that names `delegation`, its signer is one of `by`, and its
+/// signature verifies.
 async fn check(bytes: &[u8], delegation: Cid, by: &[Did]) -> Option<RevocationMatch> {
-    let chain = InvocationChain::<AnySignature>::try_from(bytes).ok()?;
-    let chain = RevocationChain::try_from(chain).ok()?;
-    if chain.revoked().to_cid() != delegation || !by.contains(chain.revoker()) {
+    let invocation: Invocation<AnySignature> = serde_ipld_dagcbor::from_slice(bytes).ok()?;
+    let revocation = Revocation::try_from(invocation).ok()?;
+    if *revocation.revoked() != delegation || !by.contains(revocation.revoker()) {
         return None;
     }
-    let invocation = chain.revocation().invocation();
+    let invocation = revocation.invocation();
     invocation.verify_signature(&DidKeyResolver).await.ok()?;
     Some(RevocationMatch {
         revocation: invocation.to_cid(),
-        principal: chain.revoker().clone(),
+        principal: revocation.revoker().clone(),
     })
 }
 

@@ -137,3 +137,83 @@ async fn it_holds_no_revocations_on_a_branch_with_no_head() -> Result<()> {
     );
     Ok(())
 }
+
+fn stored_bytes(instruction: &Instruction) -> Result<Vec<u8>> {
+    match instruction {
+        Instruction::Assert(Artifact {
+            is: Value::Bytes(bytes),
+            ..
+        }) => Ok(bytes.clone()),
+        _ => anyhow::bail!("a revocation is an assertion of bytes"),
+    }
+}
+
+fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
+}
+
+#[dialog_common::test]
+async fn it_stores_a_revocation_as_the_hash_of_the_delegation() -> Result<()> {
+    let alice = generate_signer().await;
+    let bob = generate_signer().await;
+    let granted = delegation(&alice, &bob).await?;
+
+    let stored = stored_bytes(&revoke(alice.clone(), &granted).await?)?;
+    let delegation_bytes = serde_ipld_dagcbor::to_vec(&granted)?;
+
+    // The fact names the delegation by its CID and holds no copy of it.
+    assert!(contains(&stored, &granted.to_cid().to_bytes()));
+    assert!(!contains(&stored, &delegation_bytes));
+    Ok(())
+}
+
+#[dialog_common::test]
+async fn it_ignores_a_revocation_whose_hash_is_forged() -> Result<()> {
+    let (operator, profile) = test_operator_with_profile().await;
+    let (repository, branch) = access_branch(&operator, profile.did()).await?;
+    let alice = generate_signer().await;
+    let bob = generate_signer().await;
+    let carol = generate_signer().await;
+    let granted = delegation(&alice, &bob).await?;
+    let other = delegation(&alice, &carol).await?;
+
+    // Alice revoked another delegation. A writer of the branch copies her
+    // revocation under the entity of `granted`, once as it is and once
+    // with the CID it names changed to the CID of `granted`.
+    let signed = stored_bytes(&revoke(alice.clone(), &other).await?)?;
+    let other_cid = other.to_cid().to_bytes();
+    let granted_cid = granted.to_cid().to_bytes();
+    let position = signed
+        .windows(other_cid.len())
+        .position(|window| window == other_cid.as_slice())
+        .expect("the revocation names the CID it revokes");
+    let mut forged = signed.clone();
+    forged[position..position + other_cid.len()].copy_from_slice(&granted_cid);
+    let under_granted = |bytes: Vec<u8>| -> Result<Instruction> {
+        Ok(Instruction::Assert(Artifact {
+            the: REVOCATION_ATTRIBUTE.parse()?,
+            of: revocation_entity(&granted.to_cid())?,
+            is: Value::Bytes(bytes),
+            cause: None,
+        }))
+    };
+    branch
+        .commit(stream::iter([
+            under_granted(signed)?,
+            under_granted(forged)?,
+        ]))
+        .perform(&operator)
+        .await?;
+
+    let revocations = BranchRevocations::load(&operator, repository.branch("access")).await?;
+    let chain = [alice.did(), bob.did()];
+    assert!(
+        revocations
+            .query(RevocationSelector::new(granted.to_cid(), &chain))
+            .await?
+            .is_none()
+    );
+    Ok(())
+}
