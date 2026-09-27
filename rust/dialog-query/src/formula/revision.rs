@@ -184,6 +184,8 @@ mod tests {
             authority: did_key_of(&key),
             parents,
             skips: Vec::new(),
+            claims: Vec::new(),
+            endorsement: Vec::new(),
             signature: Vec::new(),
         };
         record.signature = key

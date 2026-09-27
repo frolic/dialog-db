@@ -1869,6 +1869,8 @@ async fn it_verifies_signed_revision_records() -> Result<()> {
         authority: did_key.clone(),
         parents: vec![parent],
         skips: vec![parent],
+        claims: Vec::new(),
+        endorsement: Vec::new(),
         signature: Vec::new(),
     };
     record.signature = key.sign(&record.payload()?).to_bytes().to_vec();
@@ -1942,6 +1944,8 @@ async fn it_refuses_forged_revision_records_in_the_tree() -> Result<()> {
         authority: "did:web:example.com".to_string(),
         parents: Vec::new(),
         skips: Vec::new(),
+        claims: Vec::new(),
+        endorsement: Vec::new(),
         signature: Vec::new(),
     };
     let forged = RevisionRecord {

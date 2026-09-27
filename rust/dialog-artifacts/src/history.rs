@@ -24,7 +24,8 @@
 // crate). Re-exported here so this module remains the single import site.
 pub use dialog_capability::history::{
     Authority, Context, EDITION_LENGTH, Edition, HistoryError, Issuer, ORIGIN_LENGTH, Origin,
-    Signature, VERSION_LENGTH, Version, ed25519_key_of, verify_issuer_signature,
+    Signature, VERSION_LENGTH, Version, ed25519_key_of, endorsement_payload, verify_endorsement,
+    verify_issuer_signature,
 };
 mod cause;
 pub use cause::*;
@@ -81,6 +82,12 @@ pub use log::*;
 
 mod revision_record;
 pub use revision_record::*;
+
+mod claims_digest;
+pub use claims_digest::*;
+
+mod authorship;
+pub use authorship::*;
 
 /// The attribute under which a repository's revision lineage claims are
 /// recorded. The claim's entity is the repository DID and its value is the

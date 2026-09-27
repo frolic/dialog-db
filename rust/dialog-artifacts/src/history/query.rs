@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::ops::Bound;
 use std::str::FromStr;
 
@@ -17,7 +18,9 @@ use crate::{
     history_region_range, history_version_range,
 };
 
-use super::{Claim, History, REVISION_ATTRIBUTE, Record, RevisionRecord, Version};
+use super::{
+    Authorship, Claim, ClaimsDigest, History, REVISION_ATTRIBUTE, Record, RevisionRecord, Version,
+};
 
 /// Which history records a [`TreeHistory::select`] scan covers.
 ///
@@ -205,6 +208,74 @@ where
     #[deprecated(note = "use `select(HistorySelector::All)`")]
     pub async fn records(&self) -> Result<Vec<(Version, Record)>, DialogArtifactsError> {
         self.select(HistorySelector::All).try_collect().await
+    }
+}
+
+impl<S> TreeHistory<S>
+where
+    S: StorageBackend<Key = Blake3Hash, Value = Vec<u8>, Error = DialogStorageError>
+        + Clone
+        + ConditionalSync,
+{
+    /// Who wrote the revision `version`, when a reader can prove it (see
+    /// [`Authorship`]). None when the revision has no record that verifies,
+    /// no endorsement of its issuer, or no claims digest, or when the
+    /// history records under its version do not hash to that digest.
+    pub async fn authorship(
+        &self,
+        version: &Version,
+    ) -> Result<Option<Authorship>, DialogArtifactsError> {
+        let record = match self.revision_record(version).await {
+            Ok(Some(record)) => record,
+            Ok(None) | Err(DialogArtifactsError::InvalidSignature(_)) => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let Some(author) = record.author() else {
+            return Ok(None);
+        };
+        if record.claims.is_empty() {
+            return Ok(None);
+        }
+        let (digest, asserted) = self.claims_of(version).await?;
+        if digest.as_slice() != record.claims.as_slice() {
+            return Ok(None);
+        }
+        let manifest = self.tree.manifest(&self.storage).await?;
+        Ok(Some(Authorship::new(
+            author.to_string(),
+            *version,
+            manifest,
+            asserted,
+        )))
+    }
+
+    /// The [`ClaimsDigest`] of the history records under `version`, as a
+    /// revision record signs it.
+    pub async fn claims_digest(&self, version: &Version) -> Result<[u8; 32], DialogArtifactsError> {
+        Ok(self.claims_of(version).await?.0)
+    }
+
+    /// The claims digest under `version`, and the keys of its assertions.
+    async fn claims_of(
+        &self,
+        version: &Version,
+    ) -> Result<([u8; 32], BTreeSet<Key>), DialogArtifactsError> {
+        let (min, max) = history_version_range(version);
+        let stream = self
+            .tree
+            .stream_range((Bound::Included(min), Bound::Excluded(max)), &self.storage);
+        tokio::pin!(stream);
+        let mut digest = ClaimsDigest::new();
+        let mut asserted = BTreeSet::new();
+        while let Some(entry) = stream.try_next().await? {
+            if let State::Added(datum) = &entry.value {
+                digest.add(&entry.key, datum);
+                if !datum.retraction {
+                    asserted.insert(entry.key);
+                }
+            }
+        }
+        Ok((digest.finish(), asserted))
     }
 }
 
