@@ -1049,7 +1049,9 @@ impl ArtifactTreeExt for ArtifactTree {
             let manifest = tree.manifest(&storage).await?;
             let range = selector_range(&selector, &manifest);
 
-            let stream = tree.stream_range_handles(range, &storage);
+            // A limited scan reads ahead only the nodes its limit can reach.
+            let reach = selector.limit().map(|rows| rows as u64);
+            let stream = tree.stream_range_handles_reaching(range, &storage, reach);
             // Stage one, synchronous per entry: parse the key ONCE into
             // borrowed components for matching and spill resolution, and
             // finish every inline-valued row on the spot. Nothing else is
@@ -1132,9 +1134,18 @@ impl ArtifactTreeExt for ArtifactTree {
                 })
                 .buffered(SPILL_LOOKAHEAD);
             tokio::pin!(fetched);
-            for await item in fetched {
-                if let Some(view) = item? {
-                    yield view;
+            // A limited scan stops at its limit and polls nothing past it,
+            // so the tree reads nothing more.
+            let mut left = selector.limit().unwrap_or(usize::MAX);
+            if left > 0 {
+                for await item in fetched {
+                    if let Some(view) = item? {
+                        yield view;
+                        left -= 1;
+                        if left == 0 {
+                            break;
+                        }
+                    }
                 }
             }
         }
@@ -1163,7 +1174,9 @@ impl ArtifactTreeExt for ArtifactTree {
             let manifest = tree.manifest(&storage).await?;
             let range = selector_range(&selector, &manifest);
 
-            let stream = tree.stream_range_handles(range, &storage);
+            // A limited scan reads ahead only the nodes its limit can reach.
+            let reach = selector.limit().map(|rows| rows as u64);
+            let stream = tree.stream_range_handles_reaching(range, &storage, reach);
             // The two stages of `scan`, reconstructing whole facts: an
             // inline-valued row is parsed once and materialized here; a
             // spilled row is parsed again once its block has landed, which
@@ -1215,9 +1228,18 @@ impl ArtifactTreeExt for ArtifactTree {
                 })
                 .buffered(SPILL_LOOKAHEAD);
             tokio::pin!(fetched);
-            for await item in fetched {
-                if let Some(artifact) = item? {
-                    yield artifact;
+            // A limited scan stops at its limit and polls nothing past it,
+            // so the tree reads nothing more.
+            let mut left = selector.limit().unwrap_or(usize::MAX);
+            if left > 0 {
+                for await item in fetched {
+                    if let Some(artifact) = item? {
+                        yield artifact;
+                        left -= 1;
+                        if left == 0 {
+                            break;
+                        }
+                    }
                 }
             }
         }

@@ -1623,6 +1623,43 @@ mod tests {
         Ok(())
     }
 
+    /// A selector with a limit selects the first rows of its range, in
+    /// the order of the index it scans, and no more.
+    #[dialog_common::test]
+    async fn it_selects_the_first_rows_up_to_a_limit() -> Result<()> {
+        let (storage_backend, _temp_directory) = make_target_storage().await?;
+        let mut facts = Artifacts::anonymous(storage_backend).await?;
+
+        let name = Attribute::from_str("item/name")?;
+        facts
+            .commit((0..30).map(|index| {
+                Instruction::Assert(Artifact {
+                    the: name.clone(),
+                    of: Entity::from_str(&format!("urn:item:{index:02}")).expect("an entity"),
+                    is: Value::String(format!("item {index}")),
+                    cause: None,
+                })
+            }))
+            .await?;
+
+        let selector = ArtifactSelector::new().of_starting_with("urn:item:");
+        let all: Vec<Artifact> = facts.select(selector.clone()).owned().try_collect().await?;
+        assert_eq!(all.len(), 30);
+        let first: Vec<Artifact> = facts
+            .select(selector.clone().with_limit(5))
+            .owned()
+            .try_collect()
+            .await?;
+        assert_eq!(first, all[..5].to_vec());
+        let none: Vec<Artifact> = facts
+            .select(selector.with_limit(0))
+            .owned()
+            .try_collect()
+            .await?;
+        assert!(none.is_empty());
+        Ok(())
+    }
+
     /// A value-prefix selector ranges over the VAE index. The M3
     /// value-in-key format stores a string value's bytes inline and
     /// order-preservingly, so a prefix scan brackets the value dimension
