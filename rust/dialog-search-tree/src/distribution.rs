@@ -93,13 +93,13 @@ mod hash_memo {
     impl Hasher for FxHasher {
         fn write(&mut self, bytes: &[u8]) {
             const SEED: u64 = 0x51_7c_c1_b7_27_22_0a_95;
-            let mut chunks = bytes.chunks_exact(8);
-            for chunk in &mut chunks {
-                let word = u64::from_le_bytes(chunk.try_into().expect("8-byte chunk"));
+            let (chunks, remainder) = bytes.as_chunks::<8>();
+            for chunk in chunks {
+                let word = u64::from_le_bytes(*chunk);
                 self.0 = (self.0.rotate_left(5) ^ word).wrapping_mul(SEED);
             }
             let mut tail = 0u64;
-            for (at, byte) in chunks.remainder().iter().enumerate() {
+            for (at, byte) in remainder.iter().enumerate() {
                 tail |= u64::from(*byte) << (at * 8);
             }
             self.0 = (self.0.rotate_left(5) ^ tail).wrapping_mul(SEED);
