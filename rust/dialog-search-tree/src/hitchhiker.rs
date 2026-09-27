@@ -519,7 +519,12 @@ where
                     msgs,
                     EnqueueConfig {
                         op_buf_size: self.op_buf_size,
-                        op_buf_bytes: self.op_buf_bytes,
+                        // A tree that names its op buffer in its format uses
+                        // it, whatever this session's default.
+                        op_buf_bytes: self
+                            .manifest
+                            .and_then(|manifest| manifest.op_buffer_bytes())
+                            .unwrap_or(self.op_buf_bytes),
                         policy: self.policy,
                         trigger: self.trigger,
                         settle,

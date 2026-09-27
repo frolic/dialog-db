@@ -1158,6 +1158,7 @@ mod tests {
             max_separator: 128,
             inline_n: 64,
             spill_prefix: 16,
+            op_buffer: 4,
             max_segment: 4096,
             frame_ceiling_factor: 3,
             anchor_selector: 1,

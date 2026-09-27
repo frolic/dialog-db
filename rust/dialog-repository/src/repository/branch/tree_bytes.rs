@@ -16,10 +16,11 @@
 use std::collections::{BTreeMap, HashSet};
 
 use anyhow::Result;
-use dialog_artifacts::inspect::{inspect_node, key_components};
+use dialog_artifacts::inspect::key_components;
 use dialog_artifacts::tree::TreeStorageBridge;
 use dialog_artifacts::{Artifact, Datum, Instruction, Key, State, Value};
 use dialog_common::{Blake3Hash as NodeHash, Buffer, ConditionalSync};
+use dialog_crypto::{BlockCodec, SealKey};
 use dialog_operator::helpers::{test_operator_with_profile, unique_name};
 use dialog_search_tree::{ArchivedNodeBody, ContentAddressedStorage, PersistentNode};
 use dialog_storage::{DialogStorageError, StorageBackend};
@@ -150,7 +151,10 @@ where
             let Some(bytes) = storage.retrieve(&hash).await? else {
                 continue;
             };
-            let node = PersistentNode::<Key, State<Datum>>::try_from(Buffer::from(bytes.clone()))?;
+            let node = PersistentNode::<Key, State<Datum>>::open(
+                Buffer::from(bytes.clone()),
+                storage.codec(),
+            )?;
             if let ArchivedNodeBody::Index(index) = node.body() {
                 next.extend(index.links()?.into_iter().map(|link| link.node));
             }
@@ -162,16 +166,18 @@ where
     Ok(nodes)
 }
 
-fn break_down(nodes: &[(usize, NodeHash, Vec<u8>)]) -> Result<Breakdown> {
+fn break_down(nodes: &[(usize, NodeHash, Vec<u8>)], codec: &BlockCodec) -> Result<Breakdown> {
     let mut breakdown = Breakdown::default();
     for (depth, _, bytes) in nodes {
         breakdown.levels = breakdown.levels.max(depth + 1);
-        let summary = inspect_node(bytes.clone())?;
+        let node = PersistentNode::<Key, State<Datum>>::open(Buffer::from(bytes.clone()), codec)?;
         if *depth == 0 {
             breakdown.root = bytes.len();
-            breakdown.root_novelty = summary.novelty as usize;
         }
-        if summary.kind == "index" {
+        if let Ok(index) = node.as_index() {
+            if *depth == 0 {
+                breakdown.root_novelty = index.novelty_len();
+            }
             if *depth > 0 {
                 breakdown.index_nodes += 1;
                 breakdown.index_bytes += bytes.len();
@@ -182,7 +188,6 @@ fn break_down(nodes: &[(usize, NodeHash, Vec<u8>)]) -> Result<Breakdown> {
             breakdown.leaves += 1;
             breakdown.leaf_bytes += bytes.len();
         }
-        let node = PersistentNode::<Key, State<Datum>>::try_from(Buffer::from(bytes.clone()))?;
         let segment = node.as_segment()?;
         let mut cursor = segment.keys::<Key>()?;
         let mut raw: BTreeMap<&'static str, usize> = BTreeMap::new();
@@ -204,13 +209,14 @@ fn break_down(nodes: &[(usize, NodeHash, Vec<u8>)]) -> Result<Breakdown> {
     Ok(breakdown)
 }
 
-/// Builds a repository with a name and `posts` posts, one commit each,
-/// and prints where the bytes of its tree are.
+/// Builds a sealed repository with a name and `posts` posts, one commit
+/// each, and prints where the bytes of its tree are.
 async fn measure(posts: u64) -> Result<String> {
     let (operator, profile) = test_operator_with_profile().await;
     let repository = profile
         .repository(unique_name("tree-bytes"))
         .open()
+        .sealed(SealKey::from([7; 32]))
         .perform(&operator)
         .await?;
     let branch = repository.branch("main").open().perform(&operator).await?;
@@ -231,6 +237,7 @@ async fn measure(posts: u64) -> Result<String> {
         .await?;
     let mut seen = HashSet::new();
     let mut written = 0;
+    let mut roots = 0;
     let start = 1_767_225_600_000u64;
     for index in 0..posts {
         let facts = post(start + index * 3_600_000, index);
@@ -240,7 +247,10 @@ async fn measure(posts: u64) -> Result<String> {
             .perform(&operator)
             .await?;
         let root = NodeHash::from(*branch.revision().expect("a head").tree.hash());
-        for (_, hash, bytes) in read_tree(&root, &storage).await? {
+        for (depth, hash, bytes) in read_tree(&root, &storage).await? {
+            if depth == 0 {
+                roots += bytes.len();
+            }
             if seen.insert(hash) {
                 written += bytes.len();
             }
@@ -258,7 +268,7 @@ async fn measure(posts: u64) -> Result<String> {
             .unwrap_or_default();
         named_bytes += block.len();
     }
-    let breakdown = break_down(&nodes)?;
+    let breakdown = break_down(&nodes, storage.codec())?;
     let total = breakdown.root + breakdown.index_bytes + breakdown.leaf_bytes;
     let regions = breakdown
         .regions
@@ -273,7 +283,7 @@ async fn measure(posts: u64) -> Result<String> {
         .collect::<Vec<_>>()
         .join(", ");
     Ok(format!(
-        "| {posts} | {:.1} KB | {:.1} KB | {:.1} KB ({} ops) | {} | {:.1} KB | {} | {:.1} KB | {} | {:.1}x | {:.1} KB | {} nodes, {:.1} KB |\n  regions: {regions}",
+        "| {posts} | {:.1} KB | {:.1} KB | {:.1} KB ({} ops) | {} | {:.1} KB | {} | {:.1} KB | {} | {:.1}x | {:.1} KB | {:.1} KB | {} nodes, {:.1} KB |\n  regions: {regions}",
         json as f64 / 1024.0,
         total as f64 / 1024.0,
         breakdown.root as f64 / 1024.0,
@@ -285,6 +295,7 @@ async fn measure(posts: u64) -> Result<String> {
         breakdown.levels,
         total as f64 / json as f64,
         written as f64 / posts.max(1) as f64 / 1024.0,
+        roots as f64 / posts.max(1) as f64 / 1024.0,
         named.len(),
         (breakdown.root + named_bytes) as f64 / 1024.0,
     ))
@@ -296,10 +307,10 @@ async fn measure(posts: u64) -> Result<String> {
 #[ignore]
 async fn tree_bytes() -> Result<()> {
     let mut rows = vec![
-        "| posts | facts as JSON | tree | root | index nodes | index bytes | leaves | leaf bytes | levels | tree / JSON | written per commit | head names (with root) |".to_string(),
-        "| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |".to_string(),
+        "| posts | facts as JSON | tree | root | index nodes | index bytes | leaves | leaf bytes | levels | tree / JSON | written per commit | mean root | head names (with root) |".to_string(),
+        "| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |".to_string(),
     ];
-    for posts in [0, 10, 200] {
+    for posts in [0, 10, 50, 200, 400] {
         rows.push(measure(posts).await?);
     }
     println!("{}", rows.join("\n"));

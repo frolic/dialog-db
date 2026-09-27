@@ -105,6 +105,20 @@ pub struct Manifest {
     /// How many leading raw value bytes a spilled value's key carries as its
     /// order-preserving prefix.
     pub spill_prefix: u16,
+    /// The most bytes of buffered operations an index node holds before it
+    /// flushes them to its children, in KiB. Zero means the built-in
+    /// default, [`DEFAULT_OP_BUF_BYTES`](crate::DEFAULT_OP_BUF_BYTES).
+    ///
+    /// Each commit writes the root again, with its buffer. So a small buffer
+    /// writes fewer bytes for each commit, and a large one flushes less
+    /// often. Every writer of a tree uses the tree's own value. A reader
+    /// does not use it: a buffer of any size reads the same.
+    ///
+    /// The field takes two bytes that were padding in the archived form, and
+    /// padding is written as zeros. So a node written before the field
+    /// existed reads as zero here, and a node with zero here has the same
+    /// bytes and the same hash as before.
+    pub op_buffer: u16,
     /// Leaf-run weight cap; 0 disables it. A run between accepted seams whose
     /// summed entry weight exceeds this is force-split at deterministic,
     /// leaf-level-only positions.
@@ -148,6 +162,7 @@ impl Default for Manifest {
             max_separator: DEFAULT_MAX_SEPARATOR,
             inline_n: env_override("DIALOG_TREE_INLINE_N", DEFAULT_INLINE_N),
             spill_prefix: DEFAULT_SPILL_PREFIX,
+            op_buffer: 0,
             max_segment: env_override("DIALOG_TREE_MAX_SEGMENT", DEFAULT_MAX_SEGMENT),
             frame_ceiling_factor: env_override(
                 "DIALOG_TREE_CEILING_FACTOR",
@@ -176,7 +191,44 @@ fn env_override(name: &str, fallback: u32) -> u32 {
     }
 }
 
+/// The op buffer of a sealed tree, in KiB. A reader fetches a sealed block
+/// whole, and each commit writes a new root, so the buffer the root carries
+/// is paid by every commit and every read of a new head.
+pub const SEALED_OP_BUFFER: u16 = 16;
+
+/// The leaf size a sealed tree paces to, in bytes. A reader fetches a sealed
+/// leaf whole, so a smaller leaf holds fewer facts the reader does not need.
+pub const SEALED_MAX_SEGMENT: u32 = 16 * 1024;
+
 impl Manifest {
+    /// The format of a new sealed tree: the default, with a
+    /// [`SEALED_OP_BUFFER`] op buffer and [`SEALED_MAX_SEGMENT`] leaves.
+    /// `DIALOG_TREE_SEALED_OP_BUFFER` and `DIALOG_TREE_SEALED_MAX_SEGMENT`
+    /// override them on native targets, for measurements.
+    pub fn sealed() -> Self {
+        let op_buffer = env_override("DIALOG_TREE_SEALED_OP_BUFFER", u32::from(SEALED_OP_BUFFER));
+        Self {
+            op_buffer: u16::try_from(op_buffer).unwrap_or(SEALED_OP_BUFFER),
+            max_segment: env_override("DIALOG_TREE_SEALED_MAX_SEGMENT", SEALED_MAX_SEGMENT),
+            ..Self::default()
+        }
+    }
+
+    /// The format a new tree in storage with `codec` is written under.
+    pub fn for_codec(codec: &dialog_crypto::BlockCodec) -> Self {
+        if codec.is_sealed() {
+            Self::sealed()
+        } else {
+            Self::default()
+        }
+    }
+
+    /// The most bytes of buffered operations an index node holds, or none
+    /// when the tree uses the built-in default.
+    pub fn op_buffer_bytes(&self) -> Option<usize> {
+        (self.op_buffer > 0).then(|| usize::from(self.op_buffer) * 1024)
+    }
+
     /// The geometric split factor `m = 2^n` that the boundary coin uses. This
     /// is the effective average branching factor of the tree.
     ///
@@ -266,6 +318,7 @@ mod tests {
             max_separator: 512,
             inline_n: 4096,
             spill_prefix: 64,
+            op_buffer: 8,
             max_segment: 131072,
             frame_ceiling_factor: 2,
             anchor_selector: 1,
@@ -273,6 +326,46 @@ mod tests {
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&manifest)?;
         let decoded: Manifest = rkyv::from_bytes::<Manifest, rkyv::rancor::Error>(&bytes)?;
         assert_eq!(decoded, manifest);
+        Ok(())
+    }
+
+    /// A node written before the op buffer field existed reads with the
+    /// built-in default, and the default manifest has the same bytes as
+    /// before, so existing trees keep their hashes.
+    #[dialog_common::test]
+    async fn it_reads_a_manifest_written_before_the_op_buffer() -> anyhow::Result<()> {
+        #[derive(Debug, Clone, Copy, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+        struct Before {
+            version: u8,
+            fanout_n: u8,
+            max_separator: u32,
+            inline_n: u32,
+            spill_prefix: u16,
+            max_segment: u32,
+            frame_ceiling_factor: u32,
+            anchor_selector: u32,
+        }
+        let manifest = Manifest::default();
+        let before = Before {
+            version: manifest.version,
+            fanout_n: manifest.fanout_n,
+            max_separator: manifest.max_separator,
+            inline_n: manifest.inline_n,
+            spill_prefix: manifest.spill_prefix,
+            max_segment: manifest.max_segment,
+            frame_ceiling_factor: manifest.frame_ceiling_factor,
+            anchor_selector: manifest.anchor_selector,
+        };
+        let old = rkyv::to_bytes::<rkyv::rancor::Error>(&before)?;
+        let new = rkyv::to_bytes::<rkyv::rancor::Error>(&manifest)?;
+        assert_eq!(old.as_slice(), new.as_slice());
+        let read: Manifest = rkyv::from_bytes::<Manifest, rkyv::rancor::Error>(&old)?;
+        assert_eq!(read, manifest);
+        assert_eq!(read.op_buffer_bytes(), None);
+        assert_eq!(
+            Manifest::sealed().op_buffer_bytes(),
+            Some(usize::from(super::SEALED_OP_BUFFER) * 1024)
+        );
         Ok(())
     }
 }

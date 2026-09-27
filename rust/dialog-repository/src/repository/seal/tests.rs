@@ -4,7 +4,7 @@ wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_dedicated_worker);
 use anyhow::Result;
 use dialog_artifacts::tree::TreeStorageBridge;
 use dialog_artifacts::{
-    Artifact, ArtifactSelector, DialogArtifactsError, Entity, Instruction, Value,
+    Artifact, ArtifactSelector, Datum, DialogArtifactsError, Entity, Instruction, Key, State, Value,
 };
 use dialog_common::Blake3Hash as NodeHash;
 use dialog_common::{Blake3Hash, Buffer, ConditionalSend};
@@ -14,7 +14,10 @@ use dialog_effects::blob::{BlobError, BlobReader, ByteRange};
 use dialog_identity::{Profile, SpaceHandle};
 use dialog_operator::Operator;
 use dialog_operator::helpers::{test_operator_with_profile, unique_name};
-use dialog_search_tree::{ContentAddressedStorage, Traversable as _, Visit};
+use dialog_search_tree::{
+    ContentAddressedStorage, Manifest, PersistentNode, SEALED_MAX_SEGMENT, SEALED_OP_BUFFER,
+    Traversable as _, Visit,
+};
 use dialog_storage::provider::storage::VolatileSpace;
 use futures_util::{Stream, StreamExt as _, stream};
 
@@ -170,6 +173,36 @@ async fn it_stores_only_sealed_tree_blocks() -> Result<()> {
     commit_notes(&branch, &operator, &marker).await?;
     let blocks = stored_tree_blocks(&operator, &plain, &branch).await?;
     assert!(blocks.iter().any(|block| contains(block, &marker)));
+    Ok(())
+}
+
+/// A new sealed repository writes its tree with the sealed op buffer and
+/// leaf size, and a new plain repository writes the default format.
+#[dialog_common::test]
+async fn it_writes_a_sealed_tree_in_the_sealed_format() -> Result<()> {
+    let (operator, profile) = test_operator_with_profile().await;
+    let sealed = space(&profile, &unique_name("sealed"))
+        .create()
+        .sealed(key(1))
+        .perform(&operator)
+        .await?;
+    let plain = space(&profile, &unique_name("plain"))
+        .create()
+        .perform(&operator)
+        .await?;
+    for (repository, format) in [(&sealed, Manifest::sealed()), (&plain, Manifest::default())] {
+        let branch = repository.branch("main").open().perform(&operator).await?;
+        commit_notes(&branch, &operator, "format").await?;
+        let blocks = stored_tree_blocks(&operator, repository, &branch).await?;
+        for block in blocks {
+            let node =
+                PersistentNode::<Key, State<Datum>>::open(Buffer::from(block), repository.codec())?;
+            assert_eq!(node.manifest()?, format);
+        }
+    }
+    assert_eq!(Manifest::sealed().op_buffer, SEALED_OP_BUFFER);
+    assert_eq!(Manifest::sealed().max_segment, SEALED_MAX_SEGMENT);
+    assert_eq!(Manifest::default().op_buffer_bytes(), None);
     Ok(())
 }
 

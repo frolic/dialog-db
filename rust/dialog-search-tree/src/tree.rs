@@ -498,8 +498,10 @@ where
         Backend: StorageBackend<Key = Blake3Hash, Value = Vec<u8>, Error = DialogStorageError>
             + ConditionalSync,
     {
+        // An empty tree has no node to carry its format, so it takes the
+        // format of a new tree in this storage.
         if &self.root == NULL_BLAKE3_HASH {
-            return Ok(Manifest::default());
+            return Ok(Manifest::for_codec(storage.codec()));
         }
         let accessor = Accessor::new(self.node_cache.clone(), storage.clone());
         let node: PersistentNode<Key, Value> = accessor.get_node(&self.root).await?;
