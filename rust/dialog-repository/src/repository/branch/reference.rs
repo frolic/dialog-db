@@ -1,7 +1,7 @@
 use dialog_capability::{Did, Subject};
 use dialog_storage::BlockCodec;
 
-use crate::{Cell, LoadBranch, OpenBranch, Revision, Upstreams};
+use crate::{Cell, HeadCodec, LoadBranch, OpenBranch, Revision, Upstreams};
 use dialog_effects::memory::prelude::SpaceScope;
 
 /// A reference to a named branch within a repository's memory.
@@ -66,6 +66,16 @@ impl BranchReference {
     /// The cell holding this branch's latest [`Revision`].
     pub fn revision(&self) -> Cell<Revision> {
         self.cell("revision")
+    }
+
+    /// The cell holding this branch's latest [`Revision`] as a remote keeps
+    /// it: encoded with the branch's codec, so a sealed branch's head is
+    /// sealed ([`HeadCodec`]).
+    pub fn head(&self) -> Cell<Revision, HeadCodec> {
+        Cell::encoded_with(
+            self.space.clone().cell("revision"),
+            HeadCodec::new(self.codec.clone()),
+        )
     }
 
     /// The cell holding this branch's [`Upstreams`] tracking entries.
