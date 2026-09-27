@@ -1629,6 +1629,7 @@ dependencies = [
  "ipld-core",
  "parking_lot",
  "reqwest",
+ "rkyv",
  "ruzstd",
  "serde",
  "serde_bytes",

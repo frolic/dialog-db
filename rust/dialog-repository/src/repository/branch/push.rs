@@ -456,11 +456,12 @@ impl Push<'_> {
                     pending = rest;
                 }
 
-                // The head names the top of its tree, so a reader that
-                // holds none of it fetches the top in one round trip.
+                // The head names the nodes of the newest revisions, so a
+                // reader that holds none of the tree reads them in one
+                // round trip.
                 let mut published = revision.clone();
                 published.prefetch =
-                    name_prefetch(&NodeHash::from(*revision.tree.hash()), &tree_store).await?;
+                    name_prefetch(&revision, tree_store.backend().0.clone()).await?;
                 upstream.publish(published).perform(env).await?;
             }
         }

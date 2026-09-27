@@ -61,6 +61,74 @@ where
     }
 }
 
+/// A key range, inclusive at both ends.
+type KeyRange = (Vec<u8>, Vec<u8>);
+
+/// The nodes below `root` that hold keys in any of `ranges`, each range
+/// inclusive at both ends: the index nodes on the paths and the leaves at
+/// their ends. Each node is named once, and a node comes after its
+/// parent. The root itself is not named. A node the storage does not hold
+/// ends its path.
+///
+/// A writer names these for the reads it expects a reader to make first,
+/// so that a reader fetches them all in one round trip.
+pub async fn nodes_spanning<Key, Value, Backend>(
+    root: &Blake3Hash,
+    storage: &ContentAddressedStorage<Backend>,
+    ranges: &[(Vec<u8>, Vec<u8>)],
+) -> Result<Vec<Blake3Hash>, DialogSearchTreeError>
+where
+    Key: crate::Key,
+    Value: crate::Value,
+    Value::Archived: for<'a> CheckBytes<
+        Strategy<Validator<ArchiveValidator<'a>, SharedValidator>, rkyv::rancor::Error>,
+    >,
+    Backend: StorageBackend<Key = Blake3Hash, Value = Vec<u8>, Error = DialogStorageError>
+        + ConditionalSync,
+{
+    let mut named = Vec::new();
+    if root == NULL_BLAKE3_HASH || ranges.is_empty() {
+        return Ok(named);
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut level = vec![(root.clone(), ranges.to_vec())];
+    while !level.is_empty() {
+        let mut next = Vec::new();
+        for (hash, ranges) in level {
+            let Some(bytes) = storage.retrieve(&hash).await? else {
+                continue;
+            };
+            let node = PersistentNode::<Key, Value>::open(Buffer::from(bytes), storage.codec())?;
+            let ArchivedNodeBody::Index(index) = node.body() else {
+                continue;
+            };
+            let mut children: Vec<(usize, Vec<KeyRange>)> = Vec::new();
+            for (lower, upper) in ranges {
+                let start = index.route(&lower)?;
+                let end = index
+                    .children_within(core::ops::Bound::Included(upper.as_slice()))?
+                    .max(start + 1);
+                for at in start..end.min(index.len()) {
+                    match children.iter_mut().find(|(child, _)| *child == at) {
+                        Some((_, list)) => list.push((lower.clone(), upper.clone())),
+                        None => children.push((at, vec![(lower.clone(), upper.clone())])),
+                    }
+                }
+            }
+            children.sort_by_key(|(at, _)| *at);
+            for (at, ranges) in children {
+                let child = index.hash_at(at)?.clone();
+                if seen.insert(child.clone()) {
+                    named.push(child.clone());
+                    next.push((child, ranges));
+                }
+            }
+        }
+        level = next;
+    }
+    Ok(named)
+}
+
 /// The children of the index node `hash`, or none when it is a leaf or
 /// the storage does not hold it.
 async fn children_of<Key, Value, Backend>(
@@ -97,7 +165,7 @@ mod tests {
     use dialog_common::{Blake3Hash, Buffer};
     use dialog_storage::MemoryStorageBackend;
 
-    use super::top_nodes;
+    use super::{nodes_spanning, top_nodes};
     use crate::{
         ArchivedNodeBody, ContentAddressedStorage, Delta, Manifest, PersistentNode, PersistentTree,
         TransientTree,
@@ -151,6 +219,52 @@ mod tests {
             levels.push(children.clone());
             level = children;
         }
+    }
+
+    /// A key names the path to its leaf, one node per level below the
+    /// root. A range names every leaf it covers, and the index nodes above
+    /// them.
+    #[dialog_common::test]
+    async fn it_names_the_nodes_on_the_paths_of_a_range() -> Result<()> {
+        let (tree, storage) = build_deep_tree().await?;
+        let levels = read_levels(tree.root(), &storage).await?;
+        let leaves = levels.last().expect("the tree has leaves");
+
+        let key = 1_000u32.to_be_bytes().to_vec();
+        let path = nodes_spanning::<[u8; 4], Vec<u8>, _>(
+            tree.root(),
+            &storage,
+            &[(key.clone(), key.clone())],
+        )
+        .await?;
+        assert_eq!(
+            path.len(),
+            levels.len(),
+            "one node per level below the root"
+        );
+        let leaf = path.last().expect("a path");
+        assert!(leaves.contains(leaf));
+        let bytes = storage.retrieve(leaf).await?.expect("stored");
+        let node = PersistentNode::<[u8; 4], Vec<u8>>::open(Buffer::from(bytes), storage.codec())?;
+        let ArchivedNodeBody::Segment(segment) = node.body() else {
+            anyhow::bail!("a path ends at a leaf")
+        };
+        let mut keys = segment.keys::<[u8; 4]>()?;
+        let mut found = false;
+        while let Some((_, stored)) = keys.next_key()? {
+            found |= stored == key.as_slice();
+        }
+        assert!(found, "the leaf holds the key");
+
+        let everything = nodes_spanning::<[u8; 4], Vec<u8>, _>(
+            tree.root(),
+            &storage,
+            &[(0u32.to_be_bytes().to_vec(), 1_999u32.to_be_bytes().to_vec())],
+        )
+        .await?;
+        assert_eq!(everything.len(), levels.concat().len());
+        assert!(leaves.iter().all(|leaf| everything.contains(leaf)));
+        Ok(())
     }
 
     #[dialog_common::test]

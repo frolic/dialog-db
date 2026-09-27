@@ -1373,15 +1373,15 @@ async fn it_prefetches_the_named_top_and_merges_a_fetched_head(s3: S3Address) ->
         .perform(&operator)
         .await?
         .context("the remote has a head")?;
-    let storage = TreeStorage::new(TreeStorageBridge(crate::LocalIndex::new(
+    let store = crate::LocalIndex::new(
         &operator,
         alice_branch.archive().index(),
         alice_branch.codec().clone(),
-    )));
+    );
     assert_eq!(published.tree, pushed.tree);
     assert_eq!(
         published.prefetch,
-        crate::name_prefetch(&NodeHash::from(*pushed.tree.hash()), &storage).await?
+        crate::name_prefetch(&pushed, store).await?
     );
 
     let bob_repo = profile

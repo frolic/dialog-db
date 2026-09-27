@@ -63,6 +63,7 @@ anyhow = { workspace = true }
 # live in the tree. Pure Rust, so it decompresses in the browser too --
 # a C-backed zstd would not build for wasm.
 ruzstd = { workspace = true }
+rkyv = { workspace = true }
 serde_json = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
