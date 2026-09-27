@@ -300,13 +300,15 @@ where
         Ok(reads)
     }
 
-    /// The versions of the facts in the entity-ordered leaf `node`, in
-    /// entry order, each once: the revisions whose authors a reader of the
-    /// leaf proves. Revision records are left out, because a reader reads
-    /// them only to prove an author. Any other node has none.
+    /// The versions of the facts in the entity-ordered leaf `node` whose
+    /// keys are at most `through`, in entry order, each once: the revisions
+    /// whose authors a reader of those facts proves. Revision records are
+    /// left out, because a reader reads them only to prove an author. Any
+    /// other node has none.
     pub async fn fact_versions(
         &self,
         node: &NodeHash,
+        through: &Key,
     ) -> Result<Vec<Version>, DialogArtifactsError> {
         let mut versions = Vec::new();
         let Some(bytes) = self.storage.retrieve(node).await? else {
@@ -321,6 +323,9 @@ where
         while let Some((at, key)) = keys.next_key()? {
             if key.first() != Some(&ENTITY_KEY_TAG) {
                 continue;
+            }
+            if key > through.as_ref() {
+                break;
             }
             let revision_record = key_components(key)
                 .iter()
