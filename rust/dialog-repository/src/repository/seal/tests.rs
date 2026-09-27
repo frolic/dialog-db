@@ -362,6 +362,69 @@ async fn write_blob<C: dialog_varsig::Principal>(
     Ok((branch, entity))
 }
 
+/// A blob written after facts, and facts written after the blob, land in
+/// one sealed tree, and each edit keeps the tree's format.
+#[dialog_common::test]
+async fn it_writes_blobs_and_facts_to_one_sealed_tree() -> Result<()> {
+    let (operator, profile) = test_operator_with_profile().await;
+    let repository = space(&profile, &unique_name("sealed"))
+        .create()
+        .sealed(key(1))
+        .perform(&operator)
+        .await?;
+    let branch = repository.branch("main").open().perform(&operator).await?;
+    commit_notes(&branch, &operator, "before").await?;
+    let payload: Vec<u8> = (0..20_000u32).map(|index| (index % 251) as u8).collect();
+    let (branch, entity) = write_blob(&operator, &repository, &payload).await?;
+    branch
+        .commit(stream::iter(vec![note(500, "after")?]))
+        .perform(&operator)
+        .await?;
+    assert_eq!(read_notes(&branch, &operator).await?.len(), 201);
+    let whole = Blob::from(entity)
+        .read((&branch).into())
+        .perform(&operator)
+        .await?;
+    assert_eq!(drain(whole).await?, payload);
+    for block in stored_tree_blocks(&operator, &repository, &branch).await? {
+        let node =
+            PersistentNode::<Key, State<Datum>>::open(Buffer::from(block), repository.codec())?;
+        assert_eq!(node.manifest()?, Manifest::sealed());
+    }
+    Ok(())
+}
+
+/// A pull that merges two sealed branches keeps the sealed format.
+#[dialog_common::test]
+async fn it_merges_sealed_branches_in_the_sealed_format() -> Result<()> {
+    let (operator, profile) = test_operator_with_profile().await;
+    let repository = space(&profile, &unique_name("sealed"))
+        .create()
+        .sealed(key(1))
+        .perform(&operator)
+        .await?;
+    let main = repository.branch("main").open().perform(&operator).await?;
+    commit_notes(&main, &operator, "main").await?;
+    let feature = repository
+        .branch("feature")
+        .open()
+        .perform(&operator)
+        .await?;
+    feature.set_upstream(&main).perform(&operator).await?;
+    feature
+        .commit(stream::iter(vec![note(500, "feature")?]))
+        .perform(&operator)
+        .await?;
+    assert!(feature.pull().perform(&operator).await?.is_some());
+    assert_eq!(read_notes(&feature, &operator).await?.len(), 201);
+    for block in stored_tree_blocks(&operator, &repository, &feature).await? {
+        let node =
+            PersistentNode::<Key, State<Datum>>::open(Buffer::from(block), repository.codec())?;
+        assert_eq!(node.manifest()?, Manifest::sealed());
+    }
+    Ok(())
+}
+
 /// A sealed repository reads back a blob it wrote, whole and in part, and
 /// reports the blob's plaintext size.
 #[dialog_common::test]

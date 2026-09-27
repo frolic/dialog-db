@@ -750,9 +750,14 @@ impl<'a> Pull<'a> {
                 let screened = futures_util::StreamExt::chain(screened_history, screened_data);
 
                 let mut delta = tree_store.delta();
-                merged = Box::pin(merged.edit().integrate(screened, &tree_store))
-                    .await?
-                    .persist(&mut delta)?;
+                merged = Box::pin(
+                    merged
+                        .edit_with_manifest(&tree_store)
+                        .await?
+                        .integrate(screened, &tree_store),
+                )
+                .await?
+                .persist(&mut delta)?;
                 let merged_tree = TreeReference::from(*merged.root().as_bytes());
 
                 // The replay can degenerate, and the head selection must
@@ -902,9 +907,14 @@ impl<'a> Pull<'a> {
         let screened = futures_util::StreamExt::chain(screened_history, screened_data);
 
         let mut delta = tree_store.delta();
-        merged = Box::pin(merged.edit().integrate(screened, &tree_store))
-            .await?
-            .persist(&mut delta)?;
+        merged = Box::pin(
+            merged
+                .edit_with_manifest(&tree_store)
+                .await?
+                .integrate(screened, &tree_store),
+        )
+        .await?
+        .persist(&mut delta)?;
 
         let merged_tree = TreeReference::from(*merged.root().as_bytes());
 

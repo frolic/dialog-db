@@ -291,7 +291,8 @@ impl BlobIndexExt for ArtifactTree {
         delta.require_codec(storage.codec())?;
         let key = BlobKey::new(hash).into_key();
         let transient = self
-            .edit()
+            .edit_with_manifest(&storage)
+            .await?
             .insert(key, record.into_state(), &storage)
             .await?;
         *self = transient.persist(delta)?;
@@ -312,7 +313,11 @@ impl BlobIndexExt for ArtifactTree {
         let storage = ContentAddressedStorage::new(TreeStorageBridge(store.clone()));
         delta.require_codec(storage.codec())?;
         let key = BlobKey::new(hash).into_key();
-        let transient = self.edit().insert(key, State::Removed, &storage).await?;
+        let transient = self
+            .edit_with_manifest(&storage)
+            .await?
+            .insert(key, State::Removed, &storage)
+            .await?;
         *self = transient.persist(delta)?;
         Ok(())
     }
