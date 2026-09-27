@@ -27,12 +27,37 @@ pub const SEALED_BLOCK_HEADER_LENGTH: usize = 4 + 1 + 1 + 4 + NONCE_LENGTH;
 /// nonce is a keyed hash of the frame, so the same plaintext under the same
 /// key and padding always seals to the same bytes.
 pub fn seal(plaintext: &[u8], ring: &KeyRing, padding: Padding) -> Result<Vec<u8>, SealError> {
+    seal_frame(
+        plaintext,
+        ring,
+        padding.padded_length(LENGTH_PREFIX + plaintext.len()),
+    )
+}
+
+/// The length of the block [`seal`] makes from a frame of `frame_length`
+/// bytes.
+pub(crate) const fn sealed_length(frame_length: usize) -> usize {
+    SEALED_BLOCK_HEADER_LENGTH + frame_length + TAG_LENGTH
+}
+
+/// The frame length that holds `plaintext_length` bytes without padding.
+pub(crate) const fn frame_length(plaintext_length: usize) -> usize {
+    LENGTH_PREFIX + plaintext_length
+}
+
+/// Seals `plaintext` in a frame of `frame_length` bytes, which must hold
+/// the length prefix and the plaintext.
+pub(crate) fn seal_frame(
+    plaintext: &[u8],
+    ring: &KeyRing,
+    frame_length: usize,
+) -> Result<Vec<u8>, SealError> {
     let length = u32::try_from(plaintext.len()).map_err(|_| SealError::TooLong(plaintext.len()))?;
-    let frame_length = padding.padded_length(LENGTH_PREFIX + plaintext.len());
+    let frame_length = frame_length.max(LENGTH_PREFIX + plaintext.len());
     let generation = ring.current();
     let keys = ring.current_keys();
 
-    let mut block = Vec::with_capacity(SEALED_BLOCK_HEADER_LENGTH + frame_length + TAG_LENGTH);
+    let mut block = Vec::with_capacity(sealed_length(frame_length));
     block.extend_from_slice(&SEALED_BLOCK_MAGIC);
     block.push(SEALED_BLOCK_VERSION);
     block.push(XCHACHA20_POLY1305_BLAKE3);

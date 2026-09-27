@@ -24,6 +24,10 @@
 //! Sealing is synchronous and pure Rust on every target, because it runs
 //! inside the tree's synchronous write path.
 //!
+//! A blob can be too large to seal as one block. [`BlobSealer`] seals it as
+//! a sequence of chunks stored end to end, and [`BlobOpener`] opens any byte
+//! range of it. The blob's address is the hash of the stored chunks.
+//!
 //! ```
 //! use dialog_common::Buffer;
 //! use dialog_crypto::{BlockCodec, KeyRing, SealKey};
@@ -52,3 +56,6 @@ pub use seal::*;
 
 mod seal_key;
 pub use seal_key::*;
+
+mod sealed_blob;
+pub use sealed_blob::*;

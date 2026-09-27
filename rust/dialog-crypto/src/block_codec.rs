@@ -23,8 +23,8 @@ pub enum BlockCodec {
 /// The keys and padding a sealed store encodes with.
 #[derive(Debug)]
 pub struct SealedCodec {
-    ring: KeyRing,
-    padding: Padding,
+    pub(crate) ring: KeyRing,
+    pub(crate) padding: Padding,
 }
 
 /// A sealed block's plaintext, remembered on the sealed block's buffer so a
