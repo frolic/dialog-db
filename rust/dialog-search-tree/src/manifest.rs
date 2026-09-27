@@ -196,20 +196,14 @@ fn env_override(name: &str, fallback: u32) -> u32 {
 /// is paid by every commit and every read of a new head.
 pub const SEALED_OP_BUFFER: u16 = 16;
 
-/// The leaf size a sealed tree paces to, in bytes. A reader fetches a sealed
-/// leaf whole, so a smaller leaf holds fewer facts the reader does not need.
-pub const SEALED_MAX_SEGMENT: u32 = 16 * 1024;
-
 impl Manifest {
     /// The format of a new sealed tree: the default, with a
-    /// [`SEALED_OP_BUFFER`] op buffer and [`SEALED_MAX_SEGMENT`] leaves.
-    /// `DIALOG_TREE_SEALED_OP_BUFFER` and `DIALOG_TREE_SEALED_MAX_SEGMENT`
-    /// override them on native targets, for measurements.
+    /// [`SEALED_OP_BUFFER`] op buffer. `DIALOG_TREE_SEALED_OP_BUFFER`
+    /// overrides it on native targets, for measurements.
     pub fn sealed() -> Self {
         let op_buffer = env_override("DIALOG_TREE_SEALED_OP_BUFFER", u32::from(SEALED_OP_BUFFER));
         Self {
             op_buffer: u16::try_from(op_buffer).unwrap_or(SEALED_OP_BUFFER),
-            max_segment: env_override("DIALOG_TREE_SEALED_MAX_SEGMENT", SEALED_MAX_SEGMENT),
             ..Self::default()
         }
     }
