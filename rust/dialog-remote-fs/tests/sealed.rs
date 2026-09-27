@@ -3,17 +3,19 @@
 //! Two repositories share one seal key and one vault directory. What they
 //! push and pull is the sealed blocks as stored, so both sides converge on
 //! the same tree, and nothing they write to the vault shows a fact value.
-//! A replica with another key cannot read what was pushed.
+//! Blobs travel the same way, sealed. A replica with another key cannot read
+//! what was pushed.
 
 use anyhow::Result;
-use dialog_artifacts::{Artifact, ArtifactSelector, Instruction, Value};
+use dialog_artifacts::{Artifact, ArtifactSelector, Entity, Instruction, Value};
 use dialog_credentials::{Credential, SignerCredential};
+use dialog_effects::blob::BlobError;
 use dialog_effects::credential::prelude::*;
 use dialog_effects::storage::Location;
 use dialog_operator::helpers::{test_operator_with_profile, unique_name};
 use dialog_operator::{Operator, Profile};
 use dialog_remote_fs::FsAddress;
-use dialog_repository::{Branch, Repository, RepositoryExt as _, SealKey, SiteAddress};
+use dialog_repository::{Blob, Branch, Repository, RepositoryExt as _, SealKey, SiteAddress};
 use dialog_storage::provider::FileSystem;
 use dialog_storage::provider::storage::VolatileSpace;
 use dialog_storage::resource::Resource;
@@ -241,5 +243,82 @@ async fn it_cannot_pull_a_sealed_remote_with_another_key_or_none() -> Result<()>
         pulled.is_err() || read.is_err(),
         "a plain replica must not read: {read:?}"
     );
+    Ok(())
+}
+
+/// A blob whose bytes repeat `marker`, sent in pieces.
+fn marked_blob(marker: &str) -> Vec<u8> {
+    marker.bytes().cycle().take(150_000).collect()
+}
+
+async fn write_blob(
+    branch: &Branch,
+    operator: &Operator<VolatileSpace>,
+    payload: &[u8],
+) -> Result<Entity> {
+    let chunks: Vec<Result<Vec<u8>, BlobError>> = payload
+        .chunks(10_000)
+        .map(|chunk| Ok(chunk.to_vec()))
+        .collect();
+    Ok(Blob::import(stream::iter(chunks))
+        .write(branch.into())
+        .perform(operator)
+        .await?)
+}
+
+async fn read_blob(
+    branch: &Branch,
+    operator: &Operator<VolatileSpace>,
+    entity: &Entity,
+) -> Result<Vec<u8>> {
+    let mut reader = Blob::from(entity.clone())
+        .read(branch.into())
+        .perform(operator)
+        .await?;
+    let mut bytes = Vec::new();
+    while let Some(chunk) = reader.next().await? {
+        bytes.extend(chunk);
+    }
+    Ok(bytes)
+}
+
+/// Sealed blobs travel through the vault in both directions. Each replica
+/// reads the other's blob with the shared key, and the vault holds the
+/// blobs only sealed.
+#[dialog_common::test]
+async fn it_syncs_sealed_blobs_through_an_fs_remote() -> Result<()> {
+    let (operator, profile) = test_operator_with_profile().await;
+    let marker = unique_name("plaintext-marker");
+    let (alice, location, alice_branch) =
+        sealed_repo_with_fs_remote(&operator, &profile, "fs-sealed-blob", key(7)).await?;
+
+    let alice_blob = marked_blob(&format!("alice {marker}"));
+    let alice_entity = write_blob(&alice_branch, &operator, &alice_blob).await?;
+    alice_branch.push().perform(&operator).await?;
+
+    let bob_branch = replica(&operator, &profile, &alice, location.clone(), Some(key(7))).await?;
+    assert!(bob_branch.pull().perform(&operator).await?.is_some());
+    assert_eq!(
+        read_blob(&bob_branch, &operator, &alice_entity).await?,
+        alice_blob
+    );
+
+    // Bob's blob travels back the same way. The same bytes under the same
+    // key have the same entity on both replicas.
+    let bob_blob = marked_blob(&format!("bob {marker}"));
+    let bob_entity = write_blob(&bob_branch, &operator, &bob_blob).await?;
+    assert_eq!(
+        write_blob(&bob_branch, &operator, &alice_blob).await?,
+        alice_entity
+    );
+    bob_branch.push().perform(&operator).await?;
+    assert!(alice_branch.pull().perform(&operator).await?.is_some());
+    assert_eq!(
+        read_blob(&alice_branch, &operator, &bob_entity).await?,
+        bob_blob
+    );
+
+    #[cfg(not(target_arch = "wasm32"))]
+    assert_vault_is_sealed(&location, &marker).await?;
     Ok(())
 }
