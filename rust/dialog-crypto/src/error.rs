@@ -35,6 +35,11 @@ pub enum SealError {
     #[error("Plaintext of {0} bytes is too long to seal")]
     TooLong(usize),
 
+    /// A key chain has no link for the generation named, so the keys
+    /// before it cannot be opened.
+    #[error("No key link for generation {0}")]
+    MissingLink(u32),
+
     /// The platform could not supply randomness for a new key.
     #[error("Could not generate a seal key: {0}")]
     Randomness(String),

@@ -94,6 +94,17 @@ impl KeyRing {
         }
     }
 
+    /// A ring over derived keys, sealing under `current`.
+    pub(crate) fn from_generations(
+        current: Generation,
+        generations: BTreeMap<Generation, GenerationKeys>,
+    ) -> Self {
+        Self {
+            current,
+            generations,
+        }
+    }
+
     /// Adds `key` at `generation`. The newest generation in the ring is the
     /// one new blocks are sealed under.
     pub fn insert(mut self, generation: Generation, key: SealKey) -> Self {

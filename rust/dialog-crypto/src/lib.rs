@@ -24,6 +24,11 @@
 //! Sealing is synchronous and pure Rust on every target, because it runs
 //! inside the tree's synchronous write path.
 //!
+//! A key rotation opens a new generation under a fresh key. A [`KeyLink`]
+//! seals the previous generation's key under the new one, so a reader that
+//! holds the newest key reads every older block with
+//! [`KeyRing::from_links`].
+//!
 //! A blob can be too large to seal as one block. [`BlobSealer`] seals it as
 //! a sequence of chunks stored end to end, and [`BlobOpener`] opens any byte
 //! range of it. The blob's address is the hash of the stored chunks.
@@ -44,6 +49,9 @@ pub use block_codec::*;
 
 mod error;
 pub use error::*;
+
+mod key_link;
+pub use key_link::*;
 
 mod key_ring;
 pub use key_ring::*;
