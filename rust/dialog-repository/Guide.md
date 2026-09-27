@@ -45,7 +45,7 @@ Note: `.build(storage)` takes ownership of the storage value.
 
 A repository has its own keypair, branches, and remotes. Same name under the same profile always yields the same identity.
 
-Repositories are opened through the profile, which provides the correct subject DID. The operator resolves the name against its base directory and verifies access.
+Repositories are opened through the profile, which provides the correct subject DID. The operator verifies access and resolves the name against its base directory. The storage location names the profile DID too, so two profiles that share one storage keep separate repositories.
 
 ```rs
 let repo = profile.repository("contacts")
