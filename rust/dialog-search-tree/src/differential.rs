@@ -66,7 +66,7 @@ where
         + ConditionalSend,
 {
     let node = match storage.retrieve(&hash).await {
-        Ok(Some(bytes)) => PersistentNode::try_from(Buffer::from(bytes)).ok(),
+        Ok(Some(bytes)) => PersistentNode::open(Buffer::from(bytes), storage.codec()).ok(),
         _ => None,
     };
     (is_target, offset, node)
@@ -100,7 +100,7 @@ where
         + ConditionalSend,
 {
     let result = match storage.retrieve(&hash).await {
-        Ok(Some(bytes)) => match PersistentNode::try_from(Buffer::from(bytes)) {
+        Ok(Some(bytes)) => match PersistentNode::open(Buffer::from(bytes), storage.codec()) {
             Ok(node) => Ok(Some(node)),
             Err(error) => Err(error),
         },
@@ -431,7 +431,10 @@ where
         hash: &Blake3Hash,
     ) -> Result<Option<PersistentNode<Key, Value>>, DialogSearchTreeError> {
         match storage.retrieve(hash).await? {
-            Some(bytes) => Ok(Some(PersistentNode::try_from(Buffer::from(bytes))?)),
+            Some(bytes) => Ok(Some(PersistentNode::open(
+                Buffer::from(bytes),
+                storage.codec(),
+            )?)),
             None => Ok(None),
         }
     }

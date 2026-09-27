@@ -1452,7 +1452,7 @@ where
             }
         };
 
-        let node = PersistentNode::try_from(&body)?;
+        let node = PersistentNode::try_from(&body)?.encode(delta.codec())?;
         crate::distribution::audit::node(node.buffer().as_ref().len());
         if let Some(kind) = audit_kind {
             dialog_storage::dup_audit::note_seal(node.hash().as_bytes(), kind);
@@ -1521,7 +1521,7 @@ where
             }
         };
 
-        let node = PersistentNode::try_from(&body)?;
+        let node = PersistentNode::try_from(&body)?.encode(delta.codec())?;
         crate::distribution::audit::node(node.buffer().as_ref().len());
         if let Some(kind) = audit_kind {
             dialog_storage::dup_audit::note_seal(node.hash().as_bytes(), kind);

@@ -7,7 +7,8 @@ use rkyv::{
 };
 
 use crate::{
-    Buffer, Cache, ContentAddressedStorage, DialogSearchTreeError, Key, PersistentNode, Value,
+    BlockCodec, Buffer, Cache, ContentAddressedStorage, DialogSearchTreeError, Key, PersistentNode,
+    Value,
 };
 
 /// Accessor for retrieving durable nodes from cache and content-addressed
@@ -84,7 +85,7 @@ where
             .cache
             .get_or_fetch(hash, async |key| self.retrieve(key).await)
             .await?;
-        Self::decode(hash, buffer)
+        Self::decode(hash, buffer, self.storage.codec())
     }
 
     async fn retrieve(&self, key: &Blake3Hash) -> Result<Option<Buffer>, DialogStorageError> {
@@ -97,6 +98,7 @@ where
     fn decode<Key, Value>(
         hash: &Blake3Hash,
         buffer: Option<Buffer>,
+        codec: &BlockCodec,
     ) -> Result<PersistentNode<Key, Value>, DialogSearchTreeError>
     where
         Key: self::Key,
@@ -109,7 +111,7 @@ where
             .ok_or_else(|| {
                 DialogSearchTreeError::Node(format!("Block not found in storage: {}", hash))
             })
-            .and_then(PersistentNode::try_from)
+            .and_then(|block| PersistentNode::open(block, codec))
     }
 }
 

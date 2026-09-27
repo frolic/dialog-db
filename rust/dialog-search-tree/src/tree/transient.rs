@@ -14,7 +14,7 @@
 //! no shape decisions, because the shape was already established at edit time.
 
 use crate::{
-    Accessor, BOTTOM_RANK, Buffer, Cache, Change, ContentAddressedStorage, Delta,
+    Accessor, BOTTOM_RANK, BlockCodec, Buffer, Cache, Change, ContentAddressedStorage, Delta,
     DialogSearchTreeError, Differential, Distribution, Entry, Geometric, IndexPieceOrigin, Key,
     Link, Manifest, Node, Novelty, NoveltyEntry, NoveltyOp, PersistentNode, PersistentTree,
     PieceOrigin, Rank, TransientIndex, TransientNode, TransientSegment, TreeWalker, Value,
@@ -651,7 +651,7 @@ where
             // the window is worth opening: its miss and every other
             // pending miss go out together, rather than one round trip
             // at a time as each change reaches its own.
-            if let Some(first) = self.unopened_on_path(change.key(), &mut opened) {
+            if let Some(first) = self.unopened_on_path(change.key(), storage.codec(), &mut opened) {
                 // Widen the window until it names enough distinct nodes
                 // to be worth a round trip, the changes run out, or the
                 // window hits its ceiling. Nothing is read meanwhile, so
@@ -661,7 +661,9 @@ where
                 let mut routed = 0;
                 loop {
                     for change in pending.iter().skip(routed) {
-                        if let Some(stop) = self.unopened_on_path(change.key(), &mut opened) {
+                        if let Some(stop) =
+                            self.unopened_on_path(change.key(), storage.codec(), &mut opened)
+                        {
                             stops.insert(stop);
                         }
                     }
@@ -863,7 +865,7 @@ where
             waiting.push(at);
         };
         for (at, key) in keys.iter().enumerate() {
-            if let Some(hash) = self.unopened_on_path(key, opened) {
+            if let Some(hash) = self.unopened_on_path(key, storage.codec(), opened) {
                 stop_at(at, hash, &mut stopped, &mut queue);
             }
         }
@@ -893,7 +895,7 @@ where
                 if depth[at] >= OPEN_LEVELS {
                     continue;
                 }
-                if let Some(next) = self.unopened_on_path(keys[at], opened) {
+                if let Some(next) = self.unopened_on_path(keys[at], storage.codec(), opened) {
                     stop_at(at, next, &mut stopped, &mut queue);
                 }
             }
@@ -906,10 +908,15 @@ where
     /// Follows exactly the route an edit takes -- the transient spine by
     /// `child_for`, then stored nodes by their own routing -- and reads no
     /// storage, so it can never name a node the descent would not read.
-    fn unopened_on_path(&self, key: &Key, opened: &mut Opened<Key, Value>) -> Option<Blake3Hash> {
+    fn unopened_on_path(
+        &self,
+        key: &Key,
+        codec: &BlockCodec,
+        opened: &mut Opened<Key, Value>,
+    ) -> Option<Blake3Hash> {
         let mut node = match &self.root {
             TransientRoot::Unloaded(hash) => {
-                return self.unopened_below(hash.clone(), key, opened);
+                return self.unopened_below(hash.clone(), key, codec, opened);
             }
             TransientRoot::Loaded(node) => node,
         };
@@ -920,7 +927,7 @@ where
                     let at = child_for::<Key, Value>(&index.children, key).ok()?;
                     match &index.children[at] {
                         Node::Persistent(link) => {
-                            return self.unopened_below(link.node.clone(), key, opened);
+                            return self.unopened_below(link.node.clone(), key, codec, opened);
                         }
                         Node::Transient(child) => node = child,
                     }
@@ -942,6 +949,7 @@ where
         &self,
         hash: Blake3Hash,
         key: &Key,
+        codec: &BlockCodec,
         opened: &mut Opened<Key, Value>,
     ) -> Option<Blake3Hash> {
         let mut hash = hash;
@@ -952,7 +960,7 @@ where
             let node = match opened.entry(hash.clone()) {
                 std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
                 std::collections::hash_map::Entry::Vacant(entry) => {
-                    let Ok(node) = PersistentNode::<Key, Value>::try_from(buffer) else {
+                    let Ok(node) = PersistentNode::<Key, Value>::open(buffer, codec) else {
                         return Some(hash);
                     };
                     entry.insert(node)

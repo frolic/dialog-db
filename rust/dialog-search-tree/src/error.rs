@@ -1,3 +1,4 @@
+use dialog_crypto::SealError;
 use dialog_storage::DialogStorageError;
 use thiserror::Error;
 
@@ -23,6 +24,11 @@ pub enum DialogSearchTreeError {
     /// An error that occurs when interpreting bytes.
     #[error("Failed to interpret bytes: {0}")]
     Encoding(String),
+
+    /// A block could not be sealed or opened: it was sealed under another
+    /// key, its bytes were changed, or a sealed tree met a plain block.
+    #[error("Failed to seal or open a block: {0}")]
+    Seal(#[from] SealError),
 }
 
 impl From<DialogStorageError> for DialogSearchTreeError {

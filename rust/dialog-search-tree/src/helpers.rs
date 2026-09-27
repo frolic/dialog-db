@@ -216,7 +216,7 @@ where
     let bytes = storage.retrieve(hash).await?.ok_or_else(|| {
         DialogSearchTreeError::Node(format!("Block not found in storage: {hash}"))
     })?;
-    PersistentNode::try_from(Buffer::from(bytes))
+    PersistentNode::open(Buffer::from(bytes), storage.codec())
 }
 
 /// A stream of tree nodes.
