@@ -45,6 +45,9 @@ pub use open::*;
 mod remote;
 pub use remote::*;
 
+mod revocations;
+pub use revocations::*;
+
 mod seal;
 
 mod snapshot;
