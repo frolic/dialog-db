@@ -264,6 +264,7 @@ impl BlobIndexExt for ArtifactTree {
             + ConditionalSync,
     {
         let storage = ContentAddressedStorage::new(TreeStorageBridge(store.clone()));
+        delta.require_codec(storage.codec())?;
         let key = BlobKey::new(hash).into_key();
         let transient = self
             .edit()
@@ -285,6 +286,7 @@ impl BlobIndexExt for ArtifactTree {
             + ConditionalSync,
     {
         let storage = ContentAddressedStorage::new(TreeStorageBridge(store.clone()));
+        delta.require_codec(storage.codec())?;
         let key = BlobKey::new(hash).into_key();
         let transient = self.edit().insert(key, State::Removed, &storage).await?;
         *self = transient.persist(delta)?;

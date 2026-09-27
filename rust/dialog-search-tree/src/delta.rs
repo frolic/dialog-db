@@ -39,6 +39,18 @@ where
         &self.codec
     }
 
+    /// Fails unless this delta encodes its blocks with `codec`.
+    ///
+    /// A writer calls this with its store's codec before persisting, so a
+    /// delta made for another store cannot write plain blocks into a sealed
+    /// one, or blocks sealed under another key.
+    pub fn require_codec(&self, codec: &BlockCodec) -> Result<(), crate::DialogSearchTreeError> {
+        if &self.codec == codec {
+            return Ok(());
+        }
+        Err(crate::DialogSearchTreeError::CodecMismatch)
+    }
+
     /// Creates a new delta that contains a copy of this delta's contents.
     pub fn branch(&self) -> Self {
         Self {

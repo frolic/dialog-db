@@ -527,6 +527,7 @@ impl BufferedBatch {
             + ConditionalSync,
     {
         let storage = ContentAddressedStorage::new(TreeStorageBridge(store.clone()));
+        delta.require_codec(storage.codec())?;
         Ok(if canonicalize {
             // Canonicalizing consumes the spine (and drains every buffer, so
             // the batch's deferred flush decision is moot); a slot the batch

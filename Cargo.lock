@@ -1076,6 +1076,7 @@ dependencies = [
  "csv-async",
  "dialog-capability",
  "dialog-common",
+ "dialog-crypto",
  "dialog-effects",
  "dialog-search-tree",
  "dialog-storage",

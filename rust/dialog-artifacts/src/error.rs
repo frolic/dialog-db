@@ -83,6 +83,11 @@ pub enum DialogArtifactsError {
     #[error("An artifact selector must specify at least one field")]
     EmptySelector,
 
+    /// A sealed tree keeps every value inside its nodes; a value too large to
+    /// stay inline would be stored as a separate block that is not sealed.
+    #[error("A sealed tree cannot store a value of {0} bytes; the inline limit is exceeded")]
+    SealedSpill(usize),
+
     /// A revision signature or structural integrity check failed
     #[error("Invalid revision signature: {0}")]
     InvalidSignature(String),
