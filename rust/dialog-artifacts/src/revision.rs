@@ -316,6 +316,8 @@ impl Revision {
             authority: authority.to_string(),
             parents,
             skips,
+            claims: Vec::new(),
+            endorsement: Vec::new(),
             signature: Vec::new(),
         }
     }

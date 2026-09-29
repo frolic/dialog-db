@@ -62,6 +62,14 @@ pub struct RevisionRecord {
     /// [`carry_skips`](super::carry_skips)). Empty for genesis and merge
     /// revisions.
     pub skips: Vec<Version>,
+    /// Bytes an older record carried here: a digest of its claims. They
+    /// are kept so the record's signature still verifies.
+    #[serde(default, skip_serializing_if = "Vec::is_empty", with = "serde_bytes")]
+    pub claims: Vec<u8>,
+    /// Bytes an older record carried here: an endorsement of the issuer.
+    /// They are kept so the record's signature still verifies.
+    #[serde(default, skip_serializing_if = "Vec::is_empty", with = "serde_bytes")]
+    pub endorsement: Vec<u8>,
     /// The issuer's Ed25519 signature over [`RevisionRecord::payload`] —
     /// this record encoded with an empty signature field. The key is the
     /// one the issuer DID names (`did:key`).
