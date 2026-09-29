@@ -1,12 +1,18 @@
 use parking_lot::RwLock;
 use std::sync::Arc;
 
+use dialog_crypto::BlockCodec;
 use hashbrown::HashMap;
 
 /// A thread-safe accumulator of pending changes to tree nodes.
+///
+/// The delta is where a persist writes the blocks it produces, so it also
+/// carries the [`BlockCodec`] those blocks are stored with: a sealed delta
+/// receives sealed blocks, keyed by the hash of their sealed bytes.
 #[derive(Clone, Debug)]
 pub struct Delta<K, V> {
     contents: Arc<RwLock<HashMap<K, V>>>,
+    codec: BlockCodec,
 }
 
 impl<K, V> Delta<K, V>
@@ -14,17 +20,42 @@ where
     K: Clone + std::hash::Hash + PartialEq + Eq + std::fmt::Display,
     V: Clone,
 {
-    /// Creates an empty delta with no pending changes.
+    /// Creates an empty delta with no pending changes, whose blocks are
+    /// stored plain.
     pub fn zero() -> Self {
+        Self::encoded_with(BlockCodec::Plain)
+    }
+
+    /// Creates an empty delta whose blocks are stored with `codec`.
+    pub fn encoded_with(codec: BlockCodec) -> Self {
         Self {
             contents: Default::default(),
+            codec,
         }
+    }
+
+    /// The codec the blocks persisted into this delta are stored with.
+    pub fn codec(&self) -> &BlockCodec {
+        &self.codec
+    }
+
+    /// Fails unless this delta encodes its blocks with `codec`.
+    ///
+    /// A writer calls this with its store's codec before persisting, so a
+    /// delta made for another store cannot write plain blocks into a sealed
+    /// one, or blocks sealed under another key.
+    pub fn require_codec(&self, codec: &BlockCodec) -> Result<(), crate::DialogSearchTreeError> {
+        if &self.codec == codec {
+            return Ok(());
+        }
+        Err(crate::DialogSearchTreeError::CodecMismatch)
     }
 
     /// Creates a new delta that contains a copy of this delta's contents.
     pub fn branch(&self) -> Self {
         Self {
             contents: Arc::new(RwLock::new(self.contents.read().clone())),
+            codec: self.codec.clone(),
         }
     }
 

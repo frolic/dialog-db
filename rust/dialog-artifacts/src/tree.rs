@@ -32,7 +32,7 @@ use dialog_common::{Blake3Hash as NodeHash, ConditionalSend, ConditionalSync};
 use dialog_search_tree::{
     Buffer, ContentAddressedStorage, Delta, Manifest, PersistentTree, Value as TreeValue,
 };
-use dialog_storage::{Blake3Hash, DialogStorageError, StorageBackend};
+use dialog_storage::{Blake3Hash, BlockCodec, DialogStorageError, StorageBackend};
 use futures_util::{Stream, StreamExt};
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::iter::repeat_n;
@@ -129,6 +129,10 @@ where
     async fn get(&self, key: &Self::Key) -> Result<Option<Self::Value>, Self::Error> {
         self.0.get(key.as_bytes()).await
     }
+
+    fn block_codec(&self) -> BlockCodec {
+        self.0.block_codec()
+    }
 }
 
 /// Writes a spilling value's raw bytes as a content-addressed block into the
@@ -139,7 +143,9 @@ where
 ///
 /// This uses the raw backend directly, NOT the tree's `ContentAddressedStorage`
 /// bridge: a spilled value is a plain block addressed by its value reference,
-/// living in the same store the tree nodes do.
+/// living in the same store the tree nodes do. A sealed store refuses it,
+/// because the reference is the hash of the plaintext and the block would
+/// reach storage unsealed.
 async fn store_spilled_value<S>(
     store: &mut S,
     spill: Option<(Blake3Hash, Vec<u8>)>,
@@ -147,9 +153,13 @@ async fn store_spilled_value<S>(
 where
     S: StorageBackend<Key = Blake3Hash, Value = Vec<u8>, Error = DialogStorageError>,
 {
-    if let Some((reference, raw)) = spill {
-        store.set(reference, raw).await?;
+    let Some((reference, raw)) = spill else {
+        return Ok(());
+    };
+    if store.block_codec().is_sealed() {
+        return Err(DialogArtifactsError::SealedSpill(raw.len()));
     }
+    store.set(reference, raw).await?;
     Ok(())
 }
 
@@ -430,6 +440,10 @@ where
             return Ok(Some(buffer.as_ref().to_vec()));
         }
         self.store.get(key.as_bytes()).await
+    }
+
+    fn block_codec(&self) -> BlockCodec {
+        self.store.block_codec()
     }
 }
 
@@ -816,6 +830,7 @@ impl ArtifactTreeExt for ArtifactTree {
         I: Stream<Item = Instruction> + ConditionalSend,
     {
         let storage = ContentAddressedStorage::new(TreeStorageBridge(store.clone()));
+        delta.require_codec(storage.codec())?;
 
         // Every key this batch builds must use THIS tree's value-spill
         // threshold, and the edit batch must keep this tree's format rather
@@ -961,6 +976,7 @@ impl ArtifactTreeExt for ArtifactTree {
             + Clone
             + ConditionalSync,
     {
+        delta.require_codec(&store.block_codec())?;
         let transient = {
             // Read through the delta: this tree's latest nodes may only
             // exist there (persisted by an earlier batch, not yet flushed).
@@ -2353,6 +2369,157 @@ mod corrupt_row_tests {
             .try_collect()
             .await?;
         assert_eq!(rows.len(), 3, "materialization drops the corrupt rows");
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod sealed_tests {
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_dedicated_worker);
+
+    use super::{ArtifactTree, ArtifactTreeExt};
+    use crate::{Artifact, DialogArtifactsError, Instruction, Value};
+    use dialog_crypto::{KeyRing, SEALED_BLOCK_MAGIC, SealKey};
+    use dialog_search_tree::{BlockCodec, Delta};
+    use dialog_storage::{
+        Blake3Hash, DialogStorageError, MemoryStorageBackend, StorageBackend, StorageSource as _,
+    };
+    use futures_util::{TryStreamExt as _, stream};
+
+    const MARKER: &str = "plaintext-marker-that-must-stay-inside-the-seal";
+
+    /// A store for one sealed space: blocks in memory, and the space's codec.
+    #[derive(Clone)]
+    struct SealedSpace {
+        blocks: MemoryStorageBackend<Blake3Hash, Vec<u8>>,
+        codec: BlockCodec,
+    }
+
+    impl SealedSpace {
+        fn new() -> Self {
+            Self {
+                blocks: MemoryStorageBackend::default(),
+                codec: BlockCodec::sealed(KeyRing::new(SealKey::from([1; 32]))),
+            }
+        }
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+    impl StorageBackend for SealedSpace {
+        type Key = Blake3Hash;
+        type Value = Vec<u8>;
+        type Error = DialogStorageError;
+
+        async fn set(&mut self, key: Self::Key, value: Self::Value) -> Result<(), Self::Error> {
+            self.blocks.set(key, value).await
+        }
+
+        async fn get(&self, key: &Self::Key) -> Result<Option<Self::Value>, Self::Error> {
+            self.blocks.get(key).await
+        }
+
+        fn block_codec(&self) -> BlockCodec {
+            self.codec.clone()
+        }
+    }
+
+    fn fact(index: usize, is: Value) -> Artifact {
+        Artifact {
+            the: "note/body".parse().unwrap(),
+            of: format!("note:{index}").parse().unwrap(),
+            is,
+            cause: None,
+        }
+    }
+
+    async fn write(
+        tree: &mut ArtifactTree,
+        store: &mut SealedSpace,
+        delta: &mut Delta<dialog_common::Blake3Hash, dialog_common::Buffer>,
+        facts: Vec<Artifact>,
+    ) -> Result<(), DialogArtifactsError> {
+        tree.apply(
+            store,
+            delta,
+            stream::iter(facts.into_iter().map(Instruction::Assert)),
+        )
+        .await?;
+        for (hash, block) in delta.flush() {
+            store.set(*hash.as_bytes(), block.as_ref().to_vec()).await?;
+        }
+        Ok(())
+    }
+
+    /// Facts written through a sealed store reach it only as sealed blocks,
+    /// and read back through a fresh tree over the same store.
+    #[dialog_common::test]
+    async fn it_writes_facts_as_sealed_blocks() -> anyhow::Result<()> {
+        let mut store = SealedSpace::new();
+        let mut delta = Delta::encoded_with(store.block_codec());
+        let mut tree = ArtifactTree::empty();
+        let facts: Vec<_> = (0..300)
+            .map(|index| fact(index, Value::String(format!("{index} {MARKER}"))))
+            .collect();
+        write(&mut tree, &mut store, &mut delta, facts).await?;
+
+        let blocks: Vec<(Blake3Hash, Vec<u8>)> = store.blocks.read().try_collect().await?;
+        assert!(blocks.len() > 1);
+        for (_, bytes) in &blocks {
+            assert!(bytes.starts_with(&SEALED_BLOCK_MAGIC));
+            assert!(!bytes.windows(MARKER.len()).any(|w| w == MARKER.as_bytes()));
+        }
+
+        let reopened = ArtifactTree::from_hash(tree.root().clone());
+        let data = reopened
+            .select_data(store.clone(), &"note:42".parse()?, &"note/body".parse()?)
+            .await?;
+        assert_eq!(data.len(), 1);
+        Ok(())
+    }
+
+    /// A write that would encode blocks with another codec than its store's
+    /// fails before anything is persisted.
+    #[dialog_common::test]
+    async fn it_refuses_a_delta_of_another_codec() -> anyhow::Result<()> {
+        let mut store = SealedSpace::new();
+        let mut delta = Delta::zero();
+        let mut tree = ArtifactTree::empty();
+        let result = write(
+            &mut tree,
+            &mut store,
+            &mut delta,
+            vec![fact(0, Value::String(MARKER.into()))],
+        )
+        .await;
+        assert!(matches!(result, Err(DialogArtifactsError::Tree(_))));
+        let blocks: Vec<(Blake3Hash, Vec<u8>)> = store.blocks.read().try_collect().await?;
+        assert!(blocks.is_empty());
+        Ok(())
+    }
+
+    /// A value too large to stay inside a node is refused by a sealed store,
+    /// since it would be stored as a separate unsealed block.
+    #[dialog_common::test]
+    async fn it_refuses_to_spill_a_value_out_of_a_sealed_tree() -> anyhow::Result<()> {
+        let mut store = SealedSpace::new();
+        let mut delta = Delta::encoded_with(store.block_codec());
+        let mut tree = ArtifactTree::empty();
+        let inline_n = dialog_search_tree::Manifest::default().inline_n as usize;
+        let result = write(
+            &mut tree,
+            &mut store,
+            &mut delta,
+            vec![fact(
+                0,
+                Value::String(MARKER.repeat(inline_n / MARKER.len() + 1)),
+            )],
+        )
+        .await;
+        assert!(matches!(result, Err(DialogArtifactsError::SealedSpill(_))));
+        let blocks: Vec<(Blake3Hash, Vec<u8>)> = store.blocks.read().try_collect().await?;
+        assert!(blocks.is_empty());
         Ok(())
     }
 }

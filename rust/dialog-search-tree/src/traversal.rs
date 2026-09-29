@@ -223,7 +223,7 @@ where
                     continue;
                 };
                 let node: PersistentNode<Key, Value> =
-                    PersistentNode::try_from(Buffer::from(bytes))?;
+                    PersistentNode::open(Buffer::from(bytes), storage.codec())?;
 
                 if let ArchivedNodeBody::Index(index) = node.body() {
                     let links = index.links()?;

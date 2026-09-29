@@ -289,7 +289,7 @@ impl Push<'_> {
                 };
 
                 let index = branch.archive().index();
-                let store = LocalIndex::new(env, index.clone());
+                let store = LocalIndex::new(env, index.clone(), branch.codec().clone());
                 let base_tree = Index::from_hash(NodeHash::from(*base.hash()));
                 let current_tree = Index::from_hash(NodeHash::from(*revision.tree.hash()));
                 let tree_store = TreeStorage::new(TreeStorageBridge(store));
@@ -356,7 +356,7 @@ impl Push<'_> {
                 // the sign-in path this loop awaited each shipment in turn
                 // and measured as the single largest cost of the push (one
                 // round trip per spilled value, one after another).
-                let blob_store = LocalIndex::new(env, index.clone());
+                let blob_store = LocalIndex::new(env, index.clone(), branch.codec().clone());
                 let shipments = shipment_refs(&difference)
                     .map(|shipment| {
                         ship(
@@ -781,7 +781,7 @@ where
     Env:
         Provider<Get> + Provider<Put> + Provider<Fork<RemoteSite, Get>> + ConditionalSync + 'static,
 {
-    let local = LocalIndex::new(env, branch.archive().index());
+    let local = LocalIndex::new(env, branch.archive().index(), branch.codec().clone());
     if let Some(bytes) = local
         .get(hash.as_bytes())
         .await

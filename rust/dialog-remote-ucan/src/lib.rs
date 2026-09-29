@@ -21,6 +21,14 @@
 //! invocations are the ones [`dialog_remote_ucan_s3`] mints; only the
 //! exchange with the service differs.
 //!
+//! An address marked [`sealed`](UcanAddress::sealed) belongs to a
+//! repository whose blocks and blobs are sealed. A sealed block is
+//! ciphertext named by its digest, so the service may serve it to a
+//! plain GET with no credentials, and caches may keep it. The site
+//! reads a tree block or a whole blob at such an address with that GET
+//! first. It accepts the bytes only when they hash to the digest, and
+//! sends the invocation when they do not or when the GET fails.
+//!
 //! The server side is [`Access`]: an embedder brings a provider of the
 //! effects, the layer decodes and verifies each invocation and performs
 //! it with that provider.
@@ -30,6 +38,7 @@ mod direct;
 #[cfg(any(test, feature = "helpers"))]
 pub mod helpers;
 mod provider;
+mod public;
 pub mod server;
 mod site;
 #[cfg(test)]

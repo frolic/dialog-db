@@ -1,9 +1,12 @@
 use async_trait::async_trait;
 use dialog_capability::Provider;
 use dialog_common::{Buffer, ConditionalSync};
+use dialog_crypto::sealed_generation;
 use dialog_effects::archive::prelude::CatalogScope;
 use dialog_effects::archive::{Get, Put};
-use dialog_storage::{Blake3Hash, CborEncoder, DialogStorageError, Encoder, StorageBackend};
+use dialog_storage::{
+    Blake3Hash, BlockCodec, CborEncoder, DialogStorageError, Encoder, StorageBackend,
+};
 use serde::{Serialize, de::DeserializeOwned};
 use std::fmt::Debug;
 
@@ -12,10 +15,15 @@ use std::fmt::Debug;
 /// Bridges the capability system (`Get`/`Put` effects) with the search
 /// tree's `ContentAddressedStorage` trait. All reads and writes go to
 /// the local archive only.
+///
+/// The index carries the codec of the repository it serves. A tree over it
+/// seals and opens with that codec, and a sealed index refuses to store a
+/// block that is not sealed.
 pub struct LocalIndex<'a, Env> {
     env: &'a Env,
     encoder: CborEncoder,
     catalog: CatalogScope,
+    codec: BlockCodec,
 }
 
 impl<Env> Clone for LocalIndex<'_, Env> {
@@ -24,17 +32,20 @@ impl<Env> Clone for LocalIndex<'_, Env> {
             env: self.env,
             encoder: self.encoder.clone(),
             catalog: self.catalog.clone(),
+            codec: self.codec.clone(),
         }
     }
 }
 
 impl<'a, Env> LocalIndex<'a, Env> {
-    /// Create a local index for the given catalog capability.
-    pub fn new(env: &'a Env, catalog: CatalogScope) -> Self {
+    /// Create a local index for the given catalog capability, whose
+    /// blocks are encoded with `codec`.
+    pub fn new(env: &'a Env, catalog: CatalogScope, codec: BlockCodec) -> Self {
         Self {
             env,
             encoder: CborEncoder,
             catalog,
+            codec,
         }
     }
 
@@ -69,6 +80,11 @@ where
     type Error = DialogStorageError;
 
     async fn set(&mut self, _key: Self::Key, value: Self::Value) -> Result<(), Self::Error> {
+        if self.codec.is_sealed() && sealed_generation(&value).is_err() {
+            return Err(DialogStorageError::Storage(
+                "a sealed index refuses a block that is not sealed".into(),
+            ));
+        }
         self.catalog
             .clone()
             .put(Buffer::from(value))
@@ -79,6 +95,10 @@ where
 
     async fn get(&self, key: &Self::Key) -> Result<Option<Self::Value>, Self::Error> {
         Ok(self.catalog.clone().get(*key).perform(self.env).await?)
+    }
+
+    fn block_codec(&self) -> BlockCodec {
+        self.codec.clone()
     }
 }
 
@@ -135,7 +155,7 @@ mod tests {
     #[dialog_common::test]
     async fn it_writes_and_reads_block() -> Result<()> {
         let env = Volatile::new();
-        let mut archive = LocalIndex::new(&env, test_catalog("index"));
+        let mut archive = LocalIndex::new(&env, test_catalog("index"), BlockCodec::Plain);
 
         let block = TestBlock {
             value: 42,
@@ -152,7 +172,7 @@ mod tests {
     #[dialog_common::test]
     async fn it_returns_none_for_missing_hash() -> Result<()> {
         let env = Volatile::new();
-        let archive = LocalIndex::new(&env, test_catalog("index"));
+        let archive = LocalIndex::new(&env, test_catalog("index"), BlockCodec::Plain);
 
         let missing_hash = [0u8; 32];
         let result: Option<TestBlock> = archive.read(&missing_hash).await?;
@@ -171,18 +191,18 @@ mod tests {
         };
 
         let hash = {
-            let mut archive = LocalIndex::new(&env, test_catalog("a"));
+            let mut archive = LocalIndex::new(&env, test_catalog("a"), BlockCodec::Plain);
             archive.write(&block).await?
         };
 
         {
-            let archive = LocalIndex::new(&env, test_catalog("b"));
+            let archive = LocalIndex::new(&env, test_catalog("b"), BlockCodec::Plain);
             let result: Option<TestBlock> = archive.read(&hash).await?;
             assert!(result.is_none());
         }
 
         {
-            let archive = LocalIndex::new(&env, test_catalog("a"));
+            let archive = LocalIndex::new(&env, test_catalog("a"), BlockCodec::Plain);
             let result: Option<TestBlock> = archive.read(&hash).await?;
             assert_eq!(result, Some(block));
         }

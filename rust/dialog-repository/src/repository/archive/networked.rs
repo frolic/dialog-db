@@ -9,7 +9,7 @@ use dialog_capability::Provider;
 use dialog_common::{Buffer, ConditionalSync, Priority};
 use dialog_effects::archive::prelude::ArchiveExt;
 use dialog_effects::archive::{ArchiveError, Get, Put};
-use dialog_storage::{Blake3Hash, DialogStorageError, Encoder, StorageBackend};
+use dialog_storage::{Blake3Hash, BlockCodec, DialogStorageError, Encoder, StorageBackend};
 use serde::{Serialize, de::DeserializeOwned};
 use std::fmt::{Debug, Display};
 
@@ -112,9 +112,16 @@ impl<'a, Env> NetworkedIndex<'a, Env> {
     /// Create a networked index. With [`RemoteFallback::Remote`] (or a
     /// `Some(remote)`), reads that miss locally fall back to the remote
     /// and cache the result; see [`RemoteFallback`] for the other modes.
-    pub fn new(env: &'a Env, index: CatalogScope, remote: impl Into<RemoteFallback>) -> Self {
+    /// Its blocks are encoded with `codec`, the codec of the repository
+    /// the index serves.
+    pub fn new(
+        env: &'a Env,
+        index: CatalogScope,
+        remote: impl Into<RemoteFallback>,
+        codec: BlockCodec,
+    ) -> Self {
         Self {
-            local: LocalIndex::new(env, index),
+            local: LocalIndex::new(env, index, codec),
             remote: remote.into(),
             priority: Priority::Demand,
         }
@@ -146,6 +153,10 @@ where
     type Key = Blake3Hash;
     type Value = Vec<u8>;
     type Error = DialogStorageError;
+
+    fn block_codec(&self) -> BlockCodec {
+        self.local.block_codec()
+    }
 
     async fn set(&mut self, key: Self::Key, value: Self::Value) -> Result<(), Self::Error> {
         StorageBackend::set(&mut self.local, key, value).await
@@ -374,12 +385,14 @@ mod tests {
             &env,
             branch.archive().index(),
             RemoteFallback::Remote(origin.clone()),
+            branch.codec().clone(),
         );
         assert_eq!(demand.get(&absent).await?, None);
         let speculative = NetworkedIndex::new(
             &env,
             branch.archive().index(),
             RemoteFallback::Remote(origin),
+            branch.codec().clone(),
         )
         .with_priority(Priority::Maybe);
         assert_eq!(speculative.get(&absent).await?, None);
@@ -411,6 +424,7 @@ mod tests {
                 remote: "origin".into(),
                 reason: "no credential saved for the site".into(),
             },
+            branch.codec().clone(),
         );
 
         // A locally held block reads back: unavailability of the remote
@@ -439,8 +453,12 @@ mod tests {
 
         // The same miss under no tracked remote stays an ordinary `None`:
         // only the *unavailable* state escalates.
-        let local_only =
-            NetworkedIndex::new(&operator, branch.archive().index(), RemoteFallback::None);
+        let local_only = NetworkedIndex::new(
+            &operator,
+            branch.archive().index(),
+            RemoteFallback::None,
+            branch.codec().clone(),
+        );
         assert_eq!(
             local_only.get(&absent_key).await?,
             None,

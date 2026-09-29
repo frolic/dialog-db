@@ -9,7 +9,7 @@ use rkyv::{
 };
 
 use crate::{
-    Buffer, DialogSearchTreeError, Entry, Key, Link, Manifest, Scale, Schema, Value,
+    BlockCodec, Buffer, DialogSearchTreeError, Entry, Key, Link, Manifest, Scale, Schema, Value,
     node::codec::{common_prefix, encode_keys},
     node::columnar::{ColumnData, StreamingLeaf, column_slices, encode_column_values},
 };
@@ -96,6 +96,13 @@ impl DecodedKeys {
 /// contents are recovered as a zero-copy [`ArchivedNodeBody`] view via
 /// [`body`](PersistentNode::body).
 ///
+/// A node has two forms of its bytes: the plaintext body it is read through,
+/// and the stored block its address is the hash of. They are one buffer in a
+/// plain tree. In a sealed tree (see [`BlockCodec`]) the stored block is the
+/// sealed body, so [`hash`](Self::hash), [`buffer`](Self::buffer), and
+/// [`to_link`](Self::to_link) all describe the sealed bytes, and only
+/// [`body`](Self::body) sees the plaintext.
+///
 /// Validity is a type invariant: a `PersistentNode` can only be constructed
 /// through one of two [`TryFrom`] conversions. [`TryFrom<Buffer>`] runs full
 /// archive validation on untrusted bytes (storage, cache, the network).
@@ -110,7 +117,10 @@ pub struct PersistentNode<Key, Value> {
     key: PhantomData<Key>,
     value: PhantomData<Value>,
 
-    buffer: Buffer,
+    /// The bytes storage holds, whose hash is the node's address.
+    block: Buffer,
+    /// The body's archive bytes: the same buffer as `block` in a plain tree.
+    plaintext: Buffer,
 }
 
 impl<Key, Value> PersistentNode<Key, Value>
@@ -121,14 +131,43 @@ where
         Strategy<Validator<ArchiveValidator<'a>, SharedValidator>, rkyv::rancor::Error>,
     >,
 {
-    /// Returns the content hash of this node.
+    /// Returns the content hash of this node: the hash of its stored block.
     pub fn hash(&self) -> &Blake3Hash {
-        self.buffer.blake3_hash()
+        self.block.blake3_hash()
     }
 
-    /// Returns the underlying buffer containing serialized node data.
+    /// Returns the stored block: the bytes a store holds under
+    /// [`hash`](Self::hash), sealed when the tree is.
     pub fn buffer(&self) -> &Buffer {
-        &self.buffer
+        &self.block
+    }
+
+    /// Builds a node from a stored block, opening it with `codec` and
+    /// validating the plaintext as a node body.
+    pub fn open(block: Buffer, codec: &BlockCodec) -> Result<Self, DialogSearchTreeError> {
+        let plaintext = codec.decode(block.clone())?;
+        Self::validate(&plaintext)?;
+        Ok(Self {
+            block,
+            plaintext,
+            key: PhantomData,
+            value: PhantomData,
+        })
+    }
+
+    /// This node with its stored block encoded by `codec`: sealed for a sealed
+    /// tree, unchanged for a plain one.
+    pub fn encode(self, codec: &BlockCodec) -> Result<Self, DialogSearchTreeError> {
+        Ok(Self {
+            block: codec.encode(self.plaintext.clone())?,
+            ..self
+        })
+    }
+
+    fn validate(plaintext: &Buffer) -> Result<(), DialogSearchTreeError> {
+        rkyv::access::<ArchivedNodeBody<Value>, rkyv::rancor::Error>(plaintext.as_ref())
+            .map_err(|error| DialogSearchTreeError::Access(format!("{error}")))?;
+        Ok(())
     }
 
     /// Converts this node into a [`Link`] referencing it, carrying the
@@ -140,7 +179,7 @@ where
     pub fn to_link(&self, separator: Vec<u8>) -> Link {
         Link {
             separator,
-            node: self.buffer.blake3_hash().clone(),
+            node: self.block.blake3_hash().clone(),
             scale: self.scale(),
         }
     }
@@ -180,16 +219,17 @@ where
     /// [`TryFrom`] conversions are the only ways to build a node, and neither
     /// can admit an invalid archive, so no per-access validation runs.
     pub fn body(&self) -> &ArchivedNodeBody<Value> {
-        // SAFETY: `buffer` is a valid archive of exactly
+        // SAFETY: `plaintext` is a valid archive of exactly
         // `ArchivedNodeBody<Value>`. A node can only be built through one of
-        // two conversions: `TryFrom<Buffer>`, which proved validity by running
-        // the full bytecheck validation on untrusted bytes, or
+        // three constructors: `TryFrom<Buffer>` and `open`, which proved
+        // validity by running the full bytecheck validation on untrusted
+        // bytes, or
         // `TryFrom<&PersistentNodeBody<Value>>`, which serialized a typed body
         // whose `rkyv::to_bytes` output is by construction a valid archive of
         // that type. No unsafe constructor exists, and a `PersistentNodeBody`
         // cannot itself be built from raw bytes, so `access_unchecked` is
         // sound. Buffers are immutable and aligned.
-        unsafe { rkyv::access_unchecked::<ArchivedNodeBody<Value>>(self.buffer.as_ref()) }
+        unsafe { rkyv::access_unchecked::<ArchivedNodeBody<Value>>(self.plaintext.as_ref()) }
     }
 
     /// Whether a scan over this leaf should reuse a memoized decode
@@ -205,7 +245,7 @@ where
     /// repeat touches reuse one decode memoized on the node's [`Buffer`] instead
     /// of re-decoding the leaf once per select.
     pub fn should_memoize_keys(&self) -> bool {
-        self.buffer.should_memoize()
+        self.plaintext.should_memoize()
     }
 
     /// This segment's keys as a memoized flat-arena decode, shared via `Arc`.
@@ -213,7 +253,7 @@ where
     /// once [`should_memoize_keys`](Self::should_memoize_keys) has returned
     /// `true`; a single-touch scan streams instead (see the walker).
     pub fn memoized_keys(&self) -> Result<Arc<DecodedKeys>, DialogSearchTreeError> {
-        self.buffer
+        self.plaintext
             .memoize_decode(|| self.materialize_keys())?
             .ok_or_else(|| {
                 DialogSearchTreeError::Access("node buffer memoized a different decode".to_string())
@@ -278,11 +318,12 @@ where
     }
 }
 
-/// Builds a node from a buffer of untrusted bytes (storage, cache, the
+/// Builds a node from a plain block of untrusted bytes (storage, cache, the
 /// network), validating that it archives as `ArchivedNodeBody<Value>`. This
 /// is the only validation the node ever runs; it establishes the invariant
 /// that [`body`](PersistentNode::body) relies on for the node and all its
-/// clones.
+/// clones. A block from a sealed store goes through
+/// [`open`](PersistentNode::open) instead.
 impl<Key, Value> TryFrom<Buffer> for PersistentNode<Key, Value>
 where
     Key: self::Key,
@@ -294,13 +335,7 @@ where
     type Error = DialogSearchTreeError;
 
     fn try_from(buffer: Buffer) -> Result<Self, Self::Error> {
-        rkyv::access::<ArchivedNodeBody<Value>, rkyv::rancor::Error>(buffer.as_ref())
-            .map_err(|error| DialogSearchTreeError::Access(format!("{error}")))?;
-        Ok(Self {
-            buffer,
-            key: PhantomData,
-            value: PhantomData,
-        })
+        Self::open(buffer, &BlockCodec::Plain)
     }
 }
 
@@ -320,8 +355,10 @@ where
     type Error = DialogSearchTreeError;
 
     fn try_from(body: &PersistentNodeBody<Value>) -> Result<Self, Self::Error> {
+        let buffer = Buffer::from(body.as_bytes()?);
         Ok(Self {
-            buffer: Buffer::from(body.as_bytes()?),
+            block: buffer.clone(),
+            plaintext: buffer,
             key: PhantomData,
             value: PhantomData,
         })

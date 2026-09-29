@@ -6,21 +6,34 @@
 //! client would have: the statuses, the `ETag`, the body. The permit
 //! exchange hands the fork to the permit-based site, which redeems and
 //! performs it the way it always has.
+//!
+//! An address of a sealed repository reads a block of the `index`
+//! catalog, or a whole blob, with a plain GET first (see
+//! [`public`](crate::public)). The invocation follows only when that GET
+//! does not return the bytes.
 
 use base58::ToBase58;
 use dialog_capability::{Constraint, Effect, ForkInvocation, Provider};
 use dialog_common::Blake3Hash;
-use dialog_effects::archive::prelude::PutExt;
+use dialog_effects::archive::prelude::{GetExt as _, PutExt};
 use dialog_effects::archive::{ArchiveError, Get, Put};
 use dialog_effects::blob::prelude::{BlobImportExt as _, BlobReadExt as _};
-use dialog_effects::blob::{BlobError, BlobReader, BlobSink, BlobWriter, Import, Read};
+use dialog_effects::blob::{BlobError, BlobReader, BlobSink, BlobSource, BlobWriter, Import, Read};
 use dialog_effects::memory::prelude::{PublishExt, RetractExt};
 use dialog_effects::memory::{Edition, MemoryError, Publish, Resolve, Retract, Version};
 use dialog_remote_ucan_s3::UcanSite as PermitSite;
 
 use crate::address::Exchange;
 use crate::direct;
+use crate::public::read_public;
 use crate::site::UcanSite;
+
+/// The catalog of tree blocks, the one archive catalog a public read
+/// asks for.
+const INDEX_CATALOG: &str = "index";
+
+/// The catalog name a public read of a blob goes under.
+const BLOB_CATALOG: &str = "blob";
 
 /// Hand a fork to the permit-based site, which redeems and performs it
 /// the way it always has.
@@ -54,6 +67,19 @@ impl Provider<ForkInvocation<UcanSite, Get>> for UcanSite {
         &self,
         invocation: ForkInvocation<UcanSite, Get>,
     ) -> Result<Option<Vec<u8>>, ArchiveError> {
+        let capability = &invocation.capability;
+        if invocation.address.is_sealed()
+            && capability.catalog() == INDEX_CATALOG
+            && let Some(bytes) = read_public(
+                &invocation.address,
+                capability.subject(),
+                INDEX_CATALOG,
+                capability.digest(),
+            )
+            .await
+        {
+            return Ok(Some(bytes));
+        }
         if invocation.address.exchange() == Exchange::Permit {
             return through_permits(self, invocation).await;
         }
@@ -183,7 +209,10 @@ impl Provider<ForkInvocation<UcanSite, Retract>> for UcanSite {
 }
 
 /// A blob read answers with the bytes, the range the invocation asked
-/// for when it asked for one, as chunks off the wire.
+/// for when it asked for one, as chunks off the wire. A whole-blob read
+/// at a sealed address tries a plain GET first. A ranged read goes
+/// straight to the invocation, because a range cannot be checked
+/// against the blob's digest.
 #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl Provider<ForkInvocation<UcanSite, Read>> for UcanSite {
@@ -191,6 +220,19 @@ impl Provider<ForkInvocation<UcanSite, Read>> for UcanSite {
         &self,
         invocation: ForkInvocation<UcanSite, Read>,
     ) -> Result<BlobReader, BlobError> {
+        let capability = &invocation.capability;
+        if invocation.address.is_sealed()
+            && capability.range().is_none()
+            && let Some(bytes) = read_public(
+                &invocation.address,
+                capability.subject(),
+                BLOB_CATALOG,
+                capability.digest(),
+            )
+            .await
+        {
+            return Ok(Box::new(Whole(Some(bytes))));
+        }
         if invocation.address.exchange() == Exchange::Permit {
             return through_permits(self, invocation).await;
         }
@@ -206,6 +248,17 @@ impl Provider<ForkInvocation<UcanSite, Read>> for UcanSite {
                 answer.status
             ))),
         }
+    }
+}
+
+/// A blob read by a public GET, yielded in one piece.
+struct Whole(Option<Vec<u8>>);
+
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+impl BlobSource for Whole {
+    async fn next(&mut self) -> Result<Option<Vec<u8>>, BlobError> {
+        Ok(self.0.take().filter(|bytes| !bytes.is_empty()))
     }
 }
 

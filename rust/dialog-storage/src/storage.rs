@@ -96,6 +96,10 @@ where
     async fn get(&self, key: &Self::Key) -> Result<Option<Self::Value>, Self::Error> {
         self.backend.get(key).await
     }
+
+    fn block_codec(&self) -> dialog_crypto::BlockCodec {
+        self.backend.block_codec()
+    }
 }
 
 #[cfg(test)]

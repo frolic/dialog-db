@@ -1,9 +1,13 @@
+use crate::repository::seal::record_seal;
 use crate::{CreateRepositoryError, Repository};
 use dialog_capability::{Capability, Provider};
 use dialog_common::ConditionalSync;
 use dialog_credentials::Ed25519Signer;
 use dialog_credentials::credential::{Credential, SignerCredential};
+use dialog_crypto::{KeyRing, SealKey};
+use dialog_effects::memory;
 use dialog_effects::space::{self, SpaceExt};
+use dialog_storage::BlockCodec;
 
 /// Command to create a new repository.
 ///
@@ -62,6 +66,15 @@ impl CreateRepository {
             credential: credential.into(),
         }
     }
+    /// Create a sealed repository: every tree block it stores is sealed
+    /// under `key`, and it opens only with the same key.
+    pub fn sealed(self, key: SealKey) -> CreateSealedRepository {
+        CreateSealedRepository {
+            space: self.0,
+            credential: None,
+            key,
+        }
+    }
 }
 
 /// A [`CreateRepository`] command bound to a caller-supplied credential.
@@ -87,5 +100,57 @@ impl CreateRepositoryWith {
             .perform(env)
             .await?;
         Ok(Repository::from(self.credential))
+    }
+    /// Create the repository sealed under `key`.
+    pub fn sealed(self, key: SealKey) -> CreateSealedRepository {
+        CreateSealedRepository {
+            space: self.space,
+            credential: Some(self.credential),
+            key,
+        }
+    }
+}
+
+/// A [`CreateRepository`] command for a sealed repository.
+///
+/// The repository records the identifier of its key, so a later load
+/// refuses a missing or different key.
+pub struct CreateSealedRepository {
+    space: Capability<space::Space>,
+    credential: Option<SignerCredential>,
+    key: SealKey,
+}
+
+impl CreateSealedRepository {
+    /// Create the repository with a caller-supplied credential instead of
+    /// generating a fresh keypair.
+    pub fn with_credential(self, credential: impl Into<SignerCredential>) -> Self {
+        Self {
+            credential: Some(credential.into()),
+            ..self
+        }
+    }
+
+    /// Execute against an operator.
+    pub async fn perform<Env>(
+        self,
+        env: &Env,
+    ) -> Result<Repository<SignerCredential>, CreateRepositoryError>
+    where
+        Env: Provider<space::Create> + Provider<memory::Publish> + ConditionalSync,
+    {
+        let credential = match self.credential {
+            Some(credential) => credential,
+            None => SignerCredential::from(Ed25519Signer::generate().await?),
+        };
+        let repository = CreateRepositoryWith {
+            space: self.space,
+            credential,
+        }
+        .perform(env)
+        .await?;
+        let codec = BlockCodec::sealed(KeyRing::new(self.key));
+        record_seal(&repository.subject(), &codec, env).await?;
+        Ok(repository.encoded_with(codec))
     }
 }

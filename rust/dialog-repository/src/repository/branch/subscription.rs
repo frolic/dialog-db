@@ -657,6 +657,7 @@ where
             env,
             ArchiveScope::new(self.branch.subject()).index(),
             remote,
+            self.branch.codec().clone(),
         );
         // Keep the raw backend to fetch spilled value blocks by reference.
         let raw_store = store.clone();

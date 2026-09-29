@@ -404,7 +404,7 @@ where
         // — with its cause — on the first read that needed it, while a
         // commit every block of which is local proceeds untouched.
         let remote = source.fallback(env).await;
-        let mut store = NetworkedIndex::new(env, source.archive().index(), remote);
+        let mut store = NetworkedIndex::new(env, source.archive().index(), remote, source.codec());
 
         // Discover who we are up front: the revision is attributed to the
         // profile / operator, and the commit's `Version` — the identifier
@@ -460,7 +460,7 @@ where
         // `canonicalize()` on the builder flushes to the leaves at seal time,
         // for callers that want the history-independent form (see
         // `Commit::canonicalize`).
-        let mut delta = Delta::zero();
+        let mut delta = Delta::encoded_with(dialog_storage::StorageBackend::block_codec(&store));
         let batch = dialog_artifacts::BufferedBatch::apply_reusing(
             source.spine(),
             &tree,
@@ -1165,7 +1165,12 @@ mod history_tests {
         use dialog_artifacts::tree::ArtifactTreeExt as _;
         use dialog_common::Blake3Hash as NodeHash;
 
-        let store = NetworkedIndex::new(&operator, branch.archive().index(), None);
+        let store = NetworkedIndex::new(
+            &operator,
+            branch.archive().index(),
+            None,
+            branch.codec().clone(),
+        );
         let tree = Index::from_hash(NodeHash::from(*revision.tree.hash()));
         let data = tree
             .select_data(store, &"post:1".parse()?, &"post/title".parse()?)

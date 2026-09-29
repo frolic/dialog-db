@@ -21,7 +21,7 @@ use dialog_effects::authority::{Operator, OperatorExt as _};
 use dialog_effects::memory::Resolve;
 use dialog_query::concept::query::PlanCache;
 use dialog_search_tree::{Buffer, Cache};
-use dialog_storage::Blake3Hash;
+use dialog_storage::{Blake3Hash, BlockCodec};
 use std::sync::Arc;
 
 use crate::rules::{RuleCache, SharedRuleCache};
@@ -106,6 +106,14 @@ impl<'a> SourceRef<'a> {
         match self {
             SourceRef::Branch(branch) => branch.subject(),
             SourceRef::Snapshot(snapshot) => snapshot.subject(),
+        }
+    }
+
+    /// The codec this line's tree blocks are encoded with.
+    pub(crate) fn codec(self) -> BlockCodec {
+        match self {
+            SourceRef::Branch(branch) => branch.codec().clone(),
+            SourceRef::Snapshot(snapshot) => snapshot.codec().clone(),
         }
     }
 
@@ -290,7 +298,7 @@ impl<'a> SourceRef<'a> {
             + 'static,
     {
         let remote = self.fallback(env).await;
-        let store = NetworkedIndex::new(env, self.archive().index(), remote);
+        let store = NetworkedIndex::new(env, self.archive().index(), remote, self.codec());
         TreeHistory::from_root_with_cache(&self.root(), store, self.node_cache())
             .with_record_cache(self.records())
     }

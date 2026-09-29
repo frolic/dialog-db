@@ -23,3 +23,16 @@ pub struct UcanServiceAddress {
     /// The service's endpoint URL.
     pub endpoint: String,
 }
+
+/// The path a provisioned service answers with its [`RequestCounts`].
+pub const REQUESTS_PATH: &str = "/requests";
+
+/// How many public reads and invocations a provisioned service has
+/// received.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RequestCounts {
+    /// Plain GETs of a block or blob.
+    pub gets: u64,
+    /// Invocations.
+    pub invocations: u64,
+}

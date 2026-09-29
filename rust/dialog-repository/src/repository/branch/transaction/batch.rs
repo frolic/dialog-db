@@ -391,7 +391,13 @@ impl TransactionCommit<&Branch> {
 
         Ok(match outcome {
             Outcome::Unchanged(tip) => TransactionBatch {
-                snapshot: Snapshot::staged(branch.subject(), tip, caches, line),
+                snapshot: Snapshot::staged(
+                    branch.subject(),
+                    branch.codec().clone(),
+                    tip,
+                    caches,
+                    line,
+                ),
                 head,
                 cell,
                 base_version,
@@ -407,7 +413,13 @@ impl TransactionCommit<&Branch> {
                     record,
                     context,
                 } = *minted;
-                let snapshot = Snapshot::staged(branch.subject(), revision.clone(), caches, line);
+                let snapshot = Snapshot::staged(
+                    branch.subject(),
+                    branch.codec().clone(),
+                    revision.clone(),
+                    caches,
+                    line,
+                );
                 let version = revision.version();
                 snapshot.caches().records.insert(version, record.clone());
                 snapshot.caches().contexts.insert(version, context.clone());

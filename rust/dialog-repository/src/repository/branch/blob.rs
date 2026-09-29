@@ -7,6 +7,11 @@
 //! as ordinary assertions, then find blobs with a normal datalog query rather
 //! than a full-index scan.
 //!
+//! In a sealed repository a blob is stored sealed, chunk by chunk (see
+//! [`BlobSealer`](dialog_crypto::BlobSealer)). Its entity names the hash of
+//! the sealed bytes, so the host sees only ciphertext, and a reader with the
+//! key fetches and opens it by that entity.
+//!
 //! The surface is [`Blob`] (the noun) plus a [`BlobArchive`] target that a
 //! [`Branch`] converts into:
 //!
@@ -14,7 +19,9 @@
 //! # use dialog_capability::{Fork, Provider};
 //! # use dialog_effects::archive::{Get, Import, Put};
 //! # use dialog_effects::authority::{Attest, Identify};
-//! # use dialog_effects::blob::{//! #     BlobError, ByteRange, Import as BlobImport, Read as BlobRead, Write as BlobWrite, //! #};
+//! # use dialog_effects::blob::{
+//! #     BlobError, ByteRange, Import as BlobImport, Read as BlobRead, Write as BlobWrite,
+//! # };
 //! # use dialog_effects::memory::{Publish, Resolve};
 //! # use dialog_repository::{Blob, Branch, CommitError, RemoteSite};
 //! # async fn example<Env>(
@@ -35,7 +42,7 @@
 //! #         + Provider<BlobRead>
 //! #         + Provider<BlobWrite>
 //! #         + Provider<BlobImport>
-//! #         + Provider<crate::Hydrate>
+//! #         + Provider<dialog_repository::Hydrate>
 //! #         + Provider<Fork<RemoteSite, Resolve>>
 //! #         + Provider<Fork<RemoteSite, BlobRead>>
 //! #         + dialog_common::ConditionalSync
@@ -83,6 +90,9 @@ use dialog_effects::blob::{
 use dialog_effects::memory::{Publish, Resolve};
 use dialog_search_tree::Delta;
 use futures_util::{Stream, StreamExt};
+
+mod sealed;
+use sealed::{open_blob, sealing_error};
 
 /// A line's blob store: the target that blob reads and writes bind to.
 ///
@@ -245,16 +255,16 @@ where
         }
         _ => RemoteFallback::None,
     };
-    NetworkedIndex::new(env, source.archive().index(), remote)
+    NetworkedIndex::new(env, source.archive().index(), remote, source.codec())
 }
 
-/// The size recorded for `hash` in the line's blob index, or `None` if the
-/// current tree does not reference it.
-async fn index_size<Env>(
+/// The record for `hash` in the line's blob index, or `None` if the current
+/// tree does not reference it.
+async fn index_record<Env>(
     source: SourceRef<'_>,
     hash: &Blake3Hash,
     env: &Env,
-) -> Result<Option<u64>, CommitError>
+) -> Result<Option<BlobRecord>, CommitError>
 where
     Env: Provider<Get>
         + Provider<Put>
@@ -268,10 +278,7 @@ where
     };
     let store = index_store(source, env).await;
     let tree = Index::from_hash(NodeHash::from(*revision.tree.hash()));
-    Ok(tree
-        .get_blob(&store, hash.as_bytes())
-        .await?
-        .map(|r| r.size))
+    Ok(tree.get_blob(&store, hash.as_bytes()).await?)
 }
 
 /// Look up a blob's size from the blob index. Created by [`Blob::size`].
@@ -281,7 +288,8 @@ pub struct BlobSize<'a> {
 }
 
 impl BlobSize<'_> {
-    /// Execute the lookup, returning the size or `None` if unreferenced.
+    /// Execute the lookup, returning the content size or `None` if
+    /// unreferenced. A sealed blob's content size is its plaintext size.
     pub async fn perform<Env>(self, env: &Env) -> Result<Option<u64>, CommitError>
     where
         Env: Provider<Get>
@@ -292,7 +300,9 @@ impl BlobSize<'_> {
             + 'static,
     {
         let hash = blob_hash(&self.entity)?;
-        index_size(self.archive.source, &hash, env).await
+        Ok(index_record(self.archive.source, &hash, env)
+            .await?
+            .map(|record| record.content_size))
     }
 }
 
@@ -312,6 +322,9 @@ impl ReadBlob<'_> {
     /// local digest-verified [`Import`](dialog_effects::blob::Import) sink (so a
     /// lying remote surfaces as `DigestMismatch` at `finish`), then the
     /// requested (possibly ranged) read is served from the now-local copy.
+    ///
+    /// In a sealed repository the reader opens the stored chunks that hold
+    /// the requested range and yields their plaintext.
     pub async fn perform<Env>(self, env: &Env) -> Result<BlobReader, CommitError>
     where
         Env: Provider<Get>
@@ -326,80 +339,158 @@ impl ReadBlob<'_> {
     {
         let line = self.archive.source;
         let hash = blob_hash(&self.entity)?;
-        let range = self.range;
-
-        let local = line
-            .archive()
-            .blob()
-            .invoke(BlobRead {
-                digest: hash.clone(),
-                range,
-            })
-            .perform(env)
-            .await;
-
-        let miss_key = match local {
-            Ok(reader) => return Ok(reader),
-            Err(BlobError::NotFound(key)) => key,
-            Err(other) => return Err(other.into()),
+        let (offset, length) = self
+            .range
+            .map_or((0, None), |range| (range.offset, range.length));
+        let Some(opener) = line.codec().blob_opener(offset, length) else {
+            return read_stored(line, hash, self.range, env).await;
         };
-
-        // Local miss. Hydrate from the remote upstream, if any (a
-        // snapshot has none: its reads are local).
-        let Some(Upstream::Remote { remote: name, .. }) = line.upstream() else {
-            return Err(BlobError::NotFound(miss_key).into());
+        let range = ByteRange {
+            offset: opener.sealed_offset(),
+            length: opener.sealed_length(),
         };
-
-        // The index must already reference the blob for us to import it; without
-        // a size we have no import to issue and the miss is genuine.
-        let Some(size) = index_size(line, &hash, env).await? else {
-            return Err(BlobError::NotFound(miss_key).into());
-        };
-
-        let remote = line
-            .subject()
-            .remote(name)
-            .load()
-            .perform(env)
-            .await
-            .map_err(|e| CommitError::Blob(BlobError::Storage(e.to_string())))?;
-        let address = remote.address();
-
-        // Full-blob read from the remote, forked to its site.
-        let mut source = address
-            .subject
-            .clone()
-            .reader()
-            .archive()
-            .blob()
-            .read(hash.clone())
-            .fork(address.site())
-            .perform(env)
-            .await?;
-
-        // Write the bytes through a local digest-verified import sink.
-        let mut sink = line
-            .archive()
-            .blob()
-            .import(hash.clone(), size)
-            .perform(env)
-            .await?;
-        while let Some(chunk) = source.next().await? {
-            sink.write_all(&chunk).await?;
-        }
-        sink.finish().await?;
-
-        // Serve the requested read from the now-local copy.
-        line.archive()
-            .blob()
-            .invoke(BlobRead {
-                digest: hash,
-                range,
-            })
-            .perform(env)
-            .await
-            .map_err(Into::into)
+        let stored = read_stored(line, hash, Some(range), env).await?;
+        Ok(open_blob(stored, opener))
     }
+}
+
+/// Reads the stored bytes of blob `hash` (or a range of them), hydrating the
+/// whole blob from the remote upstream on a local miss.
+async fn read_stored<Env>(
+    line: SourceRef<'_>,
+    hash: Blake3Hash,
+    range: Option<ByteRange>,
+    env: &Env,
+) -> Result<BlobReader, CommitError>
+where
+    Env: Provider<Get>
+        + Provider<Put>
+        + Provider<BlobRead>
+        + Provider<BlobImport>
+        + Provider<Resolve>
+        + Provider<crate::Hydrate>
+        + Provider<Fork<RemoteSite, BlobRead>>
+        + ConditionalSync
+        + 'static,
+{
+    let local = line
+        .archive()
+        .blob()
+        .invoke(BlobRead {
+            digest: hash.clone(),
+            range,
+        })
+        .perform(env)
+        .await;
+
+    let miss_key = match local {
+        Ok(reader) => return Ok(reader),
+        Err(BlobError::NotFound(key)) => key,
+        Err(other) => return Err(other.into()),
+    };
+
+    // Local miss. Hydrate from the remote upstream, if any (a
+    // snapshot has none: its reads are local).
+    let Some(Upstream::Remote { remote: name, .. }) = line.upstream() else {
+        return Err(BlobError::NotFound(miss_key).into());
+    };
+
+    // The index must already reference the blob for us to import it; without
+    // a record we have no import to issue and the miss is genuine. The
+    // record's size is the stored size, which the import moves.
+    let Some(record) = index_record(line, &hash, env).await? else {
+        return Err(BlobError::NotFound(miss_key).into());
+    };
+
+    let remote = line
+        .subject()
+        .remote(name)
+        .load()
+        .perform(env)
+        .await
+        .map_err(|e| CommitError::Blob(BlobError::Storage(e.to_string())))?;
+    let address = remote.address();
+
+    // Full-blob read from the remote, forked to its site.
+    let mut source = address
+        .subject
+        .clone()
+        .reader()
+        .archive()
+        .blob()
+        .read(hash.clone())
+        .fork(address.site())
+        .perform(env)
+        .await?;
+
+    // Write the bytes through a local digest-verified import sink.
+    let mut sink = line
+        .archive()
+        .blob()
+        .import(hash.clone(), record.size)
+        .perform(env)
+        .await?;
+    while let Some(chunk) = source.next().await? {
+        sink.write_all(&chunk).await?;
+    }
+    sink.finish().await?;
+
+    // Serve the requested read from the now-local copy.
+    line.archive()
+        .blob()
+        .invoke(BlobRead {
+            digest: hash,
+            range,
+        })
+        .perform(env)
+        .await
+        .map_err(Into::into)
+}
+
+/// Streams `chunks` into the branch's blob store through the branch's codec.
+///
+/// Returns the stored blob's address and its index record. A plain branch
+/// stores the bytes as they are. A sealed branch stores them sealed, so the
+/// address is the hash of the sealed bytes, and the record names both sizes.
+/// The bytes are durable when this returns.
+pub(crate) async fn store_blob<S, Env>(
+    branch: &Branch,
+    mut chunks: S,
+    env: &Env,
+) -> Result<(dialog_storage::Blake3Hash, BlobRecord), CommitError>
+where
+    S: Stream<Item = Result<Vec<u8>, BlobError>> + ConditionalSend + Unpin,
+    Env: Provider<BlobWrite> + ConditionalSync,
+{
+    let mut sink = branch.archive().blob().write().perform(env).await?;
+    let mut sealer = branch.codec().blob_sealer();
+    let mut content_size: u64 = 0;
+    let mut size: u64 = 0;
+    while let Some(chunk) = chunks.next().await {
+        let chunk = chunk?;
+        content_size += chunk.len() as u64;
+        let Some(sealer) = sealer.as_mut() else {
+            size += chunk.len() as u64;
+            sink.write_all(&chunk).await?;
+            continue;
+        };
+        let sealed = sealer.seal(&chunk).map_err(sealing_error)?;
+        if !sealed.is_empty() {
+            size += sealed.len() as u64;
+            sink.write_all(&sealed).await?;
+        }
+    }
+    let record = match sealer {
+        Some(sealer) => {
+            let sealed = sealer.finish().map_err(sealing_error)?;
+            size += sealed.len() as u64;
+            sink.write_all(&sealed).await?;
+            BlobRecord::sealed(size, content_size)
+        }
+        None => BlobRecord::new(size),
+    };
+    let hash = sink.finish().await?;
+    Ok((*hash.as_bytes(), record))
 }
 
 /// Ingest a blob and record it in the blob index as one new revision. Created
@@ -416,12 +507,12 @@ where
     /// Execute the write, returning the blob's entity (`blob:<hash>`).
     ///
     /// Streams the source into the local blob store (hashing and counting bytes
-    /// as it goes), records the resulting `{size}` in the blob index, then
+    /// as it goes), records the resulting sizes in the blob index, then
     /// publishes a new revision CAS'd against the head this write was built on —
     /// so the bytes are durable before any revision references them, and a
     /// concurrent write that advanced the head makes this publish fail loudly
     /// rather than clobber it.
-    pub async fn perform<Env>(mut self, env: &Env) -> Result<Entity, CommitError>
+    pub async fn perform<Env>(self, env: &Env) -> Result<Entity, CommitError>
     where
         Env: Provider<BlobWrite>
             + Provider<Get>
@@ -439,26 +530,18 @@ where
         let branch = self.archive.branch()?;
 
         // 1. Stream the bytes into the local blob store. The hash is discovered
-        //    as the bytes are written; the size is counted alongside. The bytes
-        //    are durable once `finish` returns, before any revision points at
-        //    the record below.
-        let mut sink = branch.archive().blob().write().perform(env).await?;
-        let mut size: u64 = 0;
-        while let Some(chunk) = self.chunks.next().await {
-            let chunk = chunk?;
-            size += chunk.len() as u64;
-            sink.write_all(&chunk).await?;
-        }
-        let hash = sink.finish().await?;
+        //    as the bytes are written; the sizes are counted alongside. The
+        //    bytes are durable once `store_blob` returns, before any revision
+        //    points at the record below.
+        let (index_hash, record) = store_blob(branch, self.chunks, env).await?;
 
         // 2. Record the blob in the index and advance the head.
-        let index_hash: dialog_storage::Blake3Hash = *hash.as_bytes();
         advance_blob_index(
             branch,
             env,
             BlobIndexEdit::Put {
                 hash: index_hash,
-                record: BlobRecord::new(size),
+                record,
             },
         )
         .await?;
@@ -522,7 +605,12 @@ where
         }
         None => RemoteFallback::None,
     };
-    let mut store = NetworkedIndex::new(env, branch.archive().index(), remote);
+    let mut store = NetworkedIndex::new(
+        env,
+        branch.archive().index(),
+        remote,
+        branch.codec().clone(),
+    );
 
     let base_tree_hash = base_revision
         .as_ref()
@@ -530,7 +618,7 @@ where
         .unwrap_or(EMPTY_TREE_HASH);
     let mut tree = Index::from_hash(NodeHash::from(base_tree_hash));
 
-    let mut delta = Delta::zero();
+    let mut delta = Delta::encoded_with(dialog_storage::StorageBackend::block_codec(&store));
     match &edit {
         BlobIndexEdit::Put { hash, record } => {
             tree.put_blob(&mut store, &mut delta, hash, *record).await?;
@@ -662,7 +750,7 @@ impl RetractBlob<'_> {
     {
         let branch = self.archive.branch()?;
         let hash = blob_hash(&self.entity)?;
-        if index_size(SourceRef::from(branch), &hash, env)
+        if index_record(SourceRef::from(branch), &hash, env)
             .await?
             .is_none()
         {

@@ -1,16 +1,20 @@
 use dialog_common::{Blake3Hash, ConditionalSend};
 
+use dialog_crypto::BlockCodec;
 use dialog_storage::{DialogStorageError, StorageBackend};
 
 /// Content-addressed storage wrapper for tree nodes.
 ///
-/// Provides hash-verified storage and retrieval operations.
+/// Provides hash-verified storage and retrieval operations. It also carries
+/// the [`BlockCodec`] its blocks are stored with, which every tree read
+/// through it uses to open the nodes it loads.
 #[derive(Clone, Debug)]
 pub struct ContentAddressedStorage<Backend>
 where
     Backend: StorageBackend<Key = Blake3Hash, Value = Vec<u8>, Error = DialogStorageError>,
 {
     backend: Backend,
+    codec: BlockCodec,
 }
 
 impl<Backend> ContentAddressedStorage<Backend>
@@ -18,9 +22,28 @@ where
     Backend: StorageBackend<Key = Blake3Hash, Value = Vec<u8>, Error = DialogStorageError>
         + ConditionalSend,
 {
-    /// Creates a new content-addressed storage wrapper.
+    /// Creates a content-addressed storage wrapper whose blocks are encoded
+    /// with the backend's own [`StorageBackend::block_codec`].
     pub fn new(backend: Backend) -> Self {
-        Self { backend }
+        let codec = backend.block_codec();
+        Self::encoded_with(backend, codec)
+    }
+
+    /// Creates a content-addressed storage wrapper whose blocks are encoded
+    /// with `codec`, whatever the backend names.
+    pub fn encoded_with(backend: Backend, codec: BlockCodec) -> Self {
+        Self { backend, codec }
+    }
+
+    /// The codec this storage's blocks are stored with.
+    pub fn codec(&self) -> &BlockCodec {
+        &self.codec
+    }
+
+    /// An empty [`Delta`](crate::Delta) that persists blocks in this
+    /// storage's encoding.
+    pub fn delta(&self) -> crate::Delta<Blake3Hash, crate::Buffer> {
+        crate::Delta::encoded_with(self.codec.clone())
     }
 
     /// Get a reference to the interior `StorageBackend`

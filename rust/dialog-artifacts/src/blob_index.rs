@@ -2,14 +2,14 @@
 //!
 //! The blob index is the fifth ordering carried in the artifact tree (see
 //! [`BlobKey`]). Each entry maps a blob hash to a small, content-derived
-//! [`BlobRecord`] — currently the blob's size — which drives replication (the
+//! [`BlobRecord`] — the blob's stored size and content size — which drives replication (the
 //! tree differential identifies newly referenced blobs) and answers intrinsic
 //! queries such as `blob/size` without fetching the blob itself.
 //!
 //! The record rides the tree's shared `State<Datum>` value: blob keys occupy a
 //! tag range disjoint from the EAV/AEV/VAE indexes, so a blob entry's `Datum`
 //! is never seen by the fact scan. The encoding is hidden behind
-//! [`BlobRecord`]'s conversions so callers deal in `{version, size}`, not raw
+//! [`BlobRecord`]'s conversions so callers deal in sizes, not raw
 //! `Datum` fields, and a leading version byte lets the record grow.
 
 use async_stream::try_stream;
@@ -25,12 +25,20 @@ use crate::{
     tree::{ArtifactTree, TreeStorageBridge},
 };
 
-/// Current [`BlobRecord`] encoding version.
+/// Current [`BlobRecord`] encoding version for a blob stored as it is.
 pub const BLOB_RECORD_VERSION: u8 = 1;
+
+/// [`BlobRecord`] encoding version for a sealed blob: the stored size and
+/// the plaintext size.
+pub const SEALED_BLOB_RECORD_VERSION: u8 = 2;
 
 /// Number of bytes in the version-1 record encoding: one version byte plus a
 /// big-endian `u64` size.
 const BLOB_RECORD_V1_LEN: usize = 1 + 8;
+
+/// Number of bytes in the version-2 record encoding: one version byte plus
+/// two big-endian `u64` sizes.
+const BLOB_RECORD_V2_LEN: usize = 1 + 8 + 8;
 
 /// Intrinsic, content-derived metadata stored for a blob in the blob index.
 ///
@@ -40,24 +48,43 @@ const BLOB_RECORD_V1_LEN: usize = 1 + 8;
 pub struct BlobRecord {
     /// Encoding version of this record.
     pub version: u8,
-    /// Total size of the blob in bytes.
+    /// Total size of the blob as stored, in bytes. Replication moves this
+    /// many bytes.
     pub size: u64,
+    /// Size of the blob's content in bytes. It differs from `size` when the
+    /// blob is stored sealed.
+    pub content_size: u64,
 }
 
 impl BlobRecord {
-    /// A record for a blob of `size` bytes, at the current encoding version.
+    /// A record for a blob of `size` bytes stored as it is, at the current
+    /// encoding version.
     pub fn new(size: u64) -> Self {
         Self {
             version: BLOB_RECORD_VERSION,
             size,
+            content_size: size,
+        }
+    }
+
+    /// A record for a sealed blob that takes `size` bytes in storage and
+    /// holds `content_size` bytes of plaintext.
+    pub fn sealed(size: u64, content_size: u64) -> Self {
+        Self {
+            version: SEALED_BLOB_RECORD_VERSION,
+            size,
+            content_size,
         }
     }
 
     /// Encode this record as the tree value stored against a blob key.
     fn into_state(self) -> State<Datum> {
-        let mut value = Vec::with_capacity(BLOB_RECORD_V1_LEN);
+        let mut value = Vec::with_capacity(BLOB_RECORD_V2_LEN);
         value.push(self.version);
         value.extend_from_slice(&self.size.to_be_bytes());
+        if self.version == SEALED_BLOB_RECORD_VERSION {
+            value.extend_from_slice(&self.content_size.to_be_bytes());
+        }
         // Blob entries carry only the record in `blob`; blob keys never reach
         // the fact scan, so the reconstruction fields do not apply.
         State::Added(Datum {
@@ -92,17 +119,14 @@ impl BlobRecord {
             State::Removed => return Ok(None),
         };
         let bytes = datum.blob.as_deref().unwrap_or(&[]);
+        let size_at =
+            |at: usize| u64::from_be_bytes(bytes[at..at + 8].try_into().expect("checked length"));
         match bytes.first().copied() {
             Some(BLOB_RECORD_VERSION) if bytes.len() == BLOB_RECORD_V1_LEN => {
-                let size = u64::from_be_bytes(
-                    bytes[1..BLOB_RECORD_V1_LEN]
-                        .try_into()
-                        .expect("checked length"),
-                );
-                Ok(Some(Self {
-                    version: BLOB_RECORD_VERSION,
-                    size,
-                }))
+                Ok(Some(Self::new(size_at(1))))
+            }
+            Some(SEALED_BLOB_RECORD_VERSION) if bytes.len() == BLOB_RECORD_V2_LEN => {
+                Ok(Some(Self::sealed(size_at(1), size_at(9))))
             }
             Some(version) => Err(DialogArtifactsError::MalformedIndex(format!(
                 "unsupported blob record version {version} ({} bytes)",
@@ -264,6 +288,7 @@ impl BlobIndexExt for ArtifactTree {
             + ConditionalSync,
     {
         let storage = ContentAddressedStorage::new(TreeStorageBridge(store.clone()));
+        delta.require_codec(storage.codec())?;
         let key = BlobKey::new(hash).into_key();
         let transient = self
             .edit()
@@ -285,6 +310,7 @@ impl BlobIndexExt for ArtifactTree {
             + ConditionalSync,
     {
         let storage = ContentAddressedStorage::new(TreeStorageBridge(store.clone()));
+        delta.require_codec(storage.codec())?;
         let key = BlobKey::new(hash).into_key();
         let transient = self.edit().insert(key, State::Removed, &storage).await?;
         *self = transient.persist(delta)?;
@@ -371,6 +397,24 @@ mod tests {
         assert!(tree.has_blob(&store, &hash(1)).await?);
         assert_eq!(tree.get_blob(&store, &hash(2)).await?, None);
         assert!(!tree.has_blob(&store, &hash(2)).await?);
+        Ok(())
+    }
+
+    /// A plain record keeps its one-size encoding. A sealed record also
+    /// names the content size, which differs from the stored size.
+    #[dialog_common::test]
+    fn it_encodes_plain_and_sealed_records() -> Result<(), DialogArtifactsError> {
+        let plain = BlobRecord::new(4096).into_state();
+        let State::Added(datum) = &plain else {
+            panic!("a record is an addition");
+        };
+        assert_eq!(datum.blob.as_deref().map(<[u8]>::len), Some(9));
+        assert_eq!(BlobRecord::from_state(&plain)?, Some(BlobRecord::new(4096)));
+
+        let sealed = BlobRecord::sealed(4200, 4000);
+        let decoded = BlobRecord::from_state(&sealed.into_state())?;
+        assert_eq!(decoded, Some(sealed));
+        assert_eq!(decoded.map(|record| record.content_size), Some(4000));
         Ok(())
     }
 

@@ -43,7 +43,7 @@
 //! #         + Provider<Identify>
 //! #         + Provider<Attest>
 //! #         + Provider<BlobWrite>
-//! #         + Provider<crate::Hydrate>
+//! #         + Provider<dialog_repository::Hydrate>
 //! #         + Provider<Fork<RemoteSite, Resolve>>
 //! #         + dialog_common::ConditionalSync
 //! #         + 'static,
@@ -60,7 +60,7 @@
 mod prove;
 pub use prove::*;
 
-use crate::repository::branch::blob::index_store;
+use crate::repository::branch::blob::{index_store, store_blob};
 use crate::{Branch, CommitError, Index, RemoteSite};
 use dialog_artifacts::{
     Artifact, Attribute, BlobIndexExt as _, BlobRecord, DialogArtifactsError, Entity, Instruction,
@@ -248,10 +248,7 @@ impl RetainDelegation<'_> {
             // below references them (the `WriteBlob` invariant). The sink is
             // also the hashing authority: the entity is derived from the
             // digest the blob store reports, never computed on the side.
-            let mut sink = branch.archive().blob().write().perform(env).await?;
-            sink.write_all(&bytes).await?;
-            let hash = sink.finish().await?;
-            let index_hash: dialog_storage::Blake3Hash = *hash.as_bytes();
+            let (index_hash, record) = store_blob(branch, stream::iter([Ok(bytes)]), env).await?;
 
             // Idempotence: a certificate the tree already references was
             // retained with its facts in one commit, so there is nothing to
@@ -270,7 +267,7 @@ impl RetainDelegation<'_> {
             for artifact in field_artifacts(&entity, &certificate)? {
                 instructions.push(Instruction::Assert(artifact));
             }
-            entries.push(BlobRecord::new(bytes.len() as u64).entry(&index_hash));
+            entries.push(record.entry(&index_hash));
             retained.push(entity);
         }
 
@@ -336,10 +333,7 @@ impl RetractDelegation<'_> {
         let mut retracted = Vec::new();
         for certificate in self.chain.certificates() {
             let bytes = encode(&certificate)?;
-            let mut sink = branch.archive().blob().write().perform(env).await?;
-            sink.write_all(&bytes).await?;
-            let hash = sink.finish().await?;
-            let index_hash: dialog_storage::Blake3Hash = *hash.as_bytes();
+            let (index_hash, _) = store_blob(branch, stream::iter([Ok(bytes)]), env).await?;
 
             // A certificate the tree does not reference has nothing to
             // retract.
@@ -501,6 +495,59 @@ mod tests {
         assert_eq!(decoded.audience(), certificate.audience());
         assert_eq!(decoded.subject(), certificate.subject());
 
+        Ok(())
+    }
+
+    /// A sealed repository stores a retained envelope sealed, reads it back
+    /// through its entity, and retracts it by the same entity.
+    #[dialog_common::test]
+    async fn it_retains_and_retracts_a_delegation_in_a_sealed_repository() -> Result<()> {
+        let storage = Storage::volatile();
+        let profile = Profile::open(unique_name("delegation-sealed"))
+            .perform(&storage)
+            .await?;
+        let operator = profile
+            .derive(b"test")
+            .allow(Subject::any())
+            .network(Network::default())
+            .build(storage)
+            .await?;
+        let repo = profile
+            .repository(unique_name("repo"))
+            .open()
+            .sealed(crate::SealKey::from([4; 32]))
+            .perform(&operator)
+            .await?;
+        let branch = repo.branch("main").open().perform(&operator).await?;
+        let space = Ed25519Signer::generate().await?;
+        let holder = Ed25519Signer::generate().await?;
+        let chain = delegate(&space, &holder, UcanSubject::Specific(space.did())).await;
+        let envelope = chain.certificates().remove(0).encode().unwrap();
+
+        let entities = branch
+            .delegations()
+            .retain(chain.clone())
+            .perform(&operator)
+            .await?;
+        let reader = Blob::from(entities[0].clone())
+            .read((&branch).into())
+            .perform(&operator)
+            .await?;
+        assert_eq!(drain(reader).await, envelope);
+        assert_eq!(
+            Blob::from(entities[0].clone())
+                .size((&branch).into())
+                .perform(&operator)
+                .await?,
+            Some(envelope.len() as u64)
+        );
+
+        let retracted = branch
+            .delegations()
+            .retract(chain)
+            .perform(&operator)
+            .await?;
+        assert_eq!(retracted, entities);
         Ok(())
     }
 

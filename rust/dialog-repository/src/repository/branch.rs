@@ -21,6 +21,7 @@ use dialog_common::Blake3Hash;
 use dialog_effects::archive::{Get as ArchiveGet, Put as ArchivePut};
 use dialog_query::query::Application;
 use dialog_search_tree::{Buffer, Cache};
+use dialog_storage::BlockCodec;
 use std::sync::{Arc, Mutex};
 
 mod blob;
@@ -249,6 +250,12 @@ impl Branch {
         self.revision.resolve().perform(env).await?;
         self.upstream.resolve().perform(env).await?;
         Ok(())
+    }
+
+    /// The codec this branch's tree blocks are encoded with: the codec of
+    /// the repository it was opened from.
+    pub fn codec(&self) -> &BlockCodec {
+        self.reference.codec()
     }
 
     /// Returns the DID of the host repository.

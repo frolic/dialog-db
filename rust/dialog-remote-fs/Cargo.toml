@@ -29,6 +29,7 @@ getrandom = { workspace = true, features = ["js"] }
 tokio = { workspace = true, features = ["sync"] }
 
 [dev-dependencies]
+dialog-crypto = { workspace = true }
 dialog-repository = { workspace = true }
 dialog-operator = { workspace = true, features = ["helpers"] }
 dialog-network = { workspace = true }

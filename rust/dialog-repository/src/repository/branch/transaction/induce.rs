@@ -767,7 +767,12 @@ where
     // select does: a pulled head's changed paths may reference
     // remote-only blocks.
     let remote = source.fallback(env).await;
-    let store = crate::NetworkedIndex::new(env, branch.archive().index(), remote);
+    let store = crate::NetworkedIndex::new(
+        env,
+        branch.archive().index(),
+        remote,
+        branch.codec().clone(),
+    );
     let raw_store = store.clone();
     let storage = ContentAddressedStorage::new(TreeStorageBridge(store));
     let previous = crate::Index::from_hash_with_cache(

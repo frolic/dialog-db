@@ -40,6 +40,12 @@ pub struct UcanAddress {
     /// The exchange to speak at the endpoint.
     #[serde(default, skip_serializing_if = "Exchange::is_direct")]
     pub exchange: Exchange,
+    /// Whether the repository at this address stores sealed blocks and
+    /// blobs. The service serves those to a plain GET, so the site
+    /// reads a block or a whole blob that way first. Left out of the
+    /// encoding when false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub sealed: bool,
 }
 
 impl UcanAddress {
@@ -49,6 +55,7 @@ impl UcanAddress {
         Self {
             endpoint: endpoint.into(),
             exchange: Exchange::Direct,
+            sealed: false,
         }
     }
 
@@ -56,6 +63,19 @@ impl UcanAddress {
     pub fn with_exchange(mut self, exchange: Exchange) -> Self {
         self.exchange = exchange;
         self
+    }
+
+    /// The same address, for a repository that stores sealed blocks
+    /// and blobs. A read of one sends a plain GET before the invocation.
+    pub fn sealed(mut self) -> Self {
+        self.sealed = true;
+        self
+    }
+
+    /// Whether the repository at this address stores sealed blocks and
+    /// blobs.
+    pub fn is_sealed(&self) -> bool {
+        self.sealed
     }
 
     /// The access service endpoint URL.
@@ -128,5 +148,15 @@ mod tests {
             serde_ipld_dagcbor::to_vec(&UcanAddress::new("https://access.example/ucan/")).unwrap(),
             "the exchange is on the wire when it is not the default"
         );
+    }
+
+    #[dialog_common::test]
+    fn it_carries_the_sealed_flag_only_when_set() {
+        let plain = UcanAddress::new("https://access.example/ucan/");
+        let sealed = plain.clone().sealed();
+        let bytes = serde_ipld_dagcbor::to_vec(&sealed).unwrap();
+        let read_back: UcanAddress = serde_ipld_dagcbor::from_slice(&bytes).unwrap();
+        assert!(read_back.is_sealed());
+        assert_ne!(bytes, serde_ipld_dagcbor::to_vec(&plain).unwrap());
     }
 }

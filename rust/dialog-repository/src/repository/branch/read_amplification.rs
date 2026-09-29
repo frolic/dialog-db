@@ -303,7 +303,8 @@ async fn measure_shape(depth: usize) -> Result<()> {
     }
 
     let root = main.revision().expect("committed").tree;
-    let store = crate::NetworkedIndex::new(&env, main.archive().index(), None);
+    let store =
+        crate::NetworkedIndex::new(&env, main.archive().index(), None, main.codec().clone());
     let tree = crate::Index::from_hash(dialog_common::Blake3Hash::from(*root.hash()));
     let tree_store = dialog_search_tree::ContentAddressedStorage::new(TreeStorageBridge(store));
 
@@ -394,7 +395,8 @@ async fn measure_write_paths(depth: usize, batches: usize) -> Result<()> {
     }
 
     // Canonical: reshape per batch, exactly what the commit path does today.
-    let mut store = crate::NetworkedIndex::new(&env, main.archive().index(), None);
+    let mut store =
+        crate::NetworkedIndex::new(&env, main.archive().index(), None, main.codec().clone());
     let mut canonical = base.clone();
     let started = Instant::now();
     for i in 0..batches {

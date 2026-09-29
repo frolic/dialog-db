@@ -14,7 +14,7 @@ use dialog_common::ConditionalSync;
 use dialog_effects::archive::{Get, Import, Put};
 use dialog_effects::authority::{Attest, Identify, OperatorExt};
 use dialog_effects::memory::{Publish, Resolve};
-use dialog_search_tree::{ContentAddressedStorage as TreeStorage, Delta};
+use dialog_search_tree::ContentAddressedStorage as TreeStorage;
 use futures_util::future::Either;
 
 use crate::{
@@ -244,7 +244,12 @@ impl<'a> Pull<'a> {
         // when the upstream is remote, falls back to the remote
         // archive for blocks that haven't been replicated. With
         // `remote: None` it degrades to a plain local index.
-        let mut store = NetworkedIndex::new(env, branch.archive().index(), remote);
+        let mut store = NetworkedIndex::new(
+            env,
+            branch.archive().index(),
+            remote,
+            branch.codec().clone(),
+        );
 
         // The three trees: last-sync base, the upstream revision we're
         // merging in, and the local tree the merge integrates onto.
@@ -552,7 +557,7 @@ impl<'a> Pull<'a> {
                     }
                 }
 
-                let mut delta = Delta::zero();
+                let mut delta = tree_store.delta();
                 let mut merged = stitched.persist(&mut delta)?;
                 let merged_tree = TreeReference::from(*merged.root().as_bytes());
 
@@ -710,7 +715,7 @@ impl<'a> Pull<'a> {
                 };
                 let screened = futures_util::StreamExt::chain(screened_history, screened_data);
 
-                let mut delta = Delta::zero();
+                let mut delta = tree_store.delta();
                 merged = Box::pin(merged.edit().integrate(screened, &tree_store))
                     .await?
                     .persist(&mut delta)?;
@@ -862,7 +867,7 @@ impl<'a> Pull<'a> {
         };
         let screened = futures_util::StreamExt::chain(screened_history, screened_data);
 
-        let mut delta = Delta::zero();
+        let mut delta = tree_store.delta();
         merged = Box::pin(merged.edit().integrate(screened, &tree_store))
             .await?
             .persist(&mut delta)?;

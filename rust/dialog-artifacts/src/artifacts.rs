@@ -452,7 +452,8 @@ where
             // write target. This method adds only the surrounding
             // transaction bookkeeping — base-revision capture, revision
             // persistence, pointer advance, and the rollback below.
-            let mut delta: Delta<NodeHash, TreeBuffer> = Delta::zero();
+            let mut delta: Delta<NodeHash, TreeBuffer> =
+                Delta::encoded_with(self.storage.block_codec());
             apply_buffered_reusing(
                 &self.spine,
                 &mut index,
@@ -498,7 +499,8 @@ where
         let transaction_result = async {
             let mut index = self.index.write().await;
 
-            let mut delta: Delta<NodeHash, TreeBuffer> = Delta::zero();
+            let mut delta: Delta<NodeHash, TreeBuffer> =
+                Delta::encoded_with(self.storage.block_codec());
             let batch = BufferedBatch::apply_reusing(
                 &self.spine,
                 &index,
