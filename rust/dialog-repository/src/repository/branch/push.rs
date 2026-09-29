@@ -22,8 +22,9 @@ use dialog_storage::StorageBackend as _;
 use futures_util::{StreamExt as _, TryStreamExt as _, stream};
 
 use crate::{
-    Branch, Index, LocalIndex, PublishError, PushError, RemoteArchiveIndex, RemoteRepository,
-    RemoteSite, RepositoryMemoryExt, Revision, Upstream, UpstreamBranch, name_prefetch,
+    Branch, Index, LocalIndex, NetworkedIndex, PublishError, PushError, RemoteArchiveIndex,
+    RemoteRepository, RemoteSite, RepositoryMemoryExt, Revision, Upstream, UpstreamBranch,
+    name_prefetch,
 };
 
 /// Command struct for pushing local changes to an upstream branch.
@@ -459,10 +460,12 @@ impl Push<'_> {
 
                 // The head names the nodes of the newest revisions, so a
                 // reader that holds none of the tree reads them in one
-                // round trip.
+                // round trip. A partial replica may not hold the history
+                // of every newest revision, so a miss reads from the target.
                 let mut published = revision.clone();
-                published.prefetch =
-                    name_prefetch(&revision, tree_store.backend().0.clone()).await?;
+                let named_from =
+                    NetworkedIndex::new(env, index.clone(), remote.clone(), branch.codec().clone());
+                published.prefetch = name_prefetch(&revision, named_from).await?;
                 upstream.publish(published).perform(env).await?;
             }
         }
