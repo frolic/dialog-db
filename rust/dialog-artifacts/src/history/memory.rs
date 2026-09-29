@@ -34,6 +34,8 @@ impl MemoryHistory {
             authority: revision.authority().to_string(),
             parents: revision.cause().versions().to_vec(),
             skips: Vec::new(),
+            claims: Vec::new(),
+            endorsement: Vec::new(),
             // A test double stores records as-is and never verifies them,
             // so the signature stays empty.
             signature: Vec::new(),
