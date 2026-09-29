@@ -56,6 +56,9 @@ mod metadata;
 mod open;
 pub use open::*;
 
+mod prefetch;
+pub use prefetch::*;
+
 mod pull;
 pub use pull::*;
 
@@ -103,6 +106,9 @@ mod integration_tests;
     any(feature = "integration-tests", feature = "web-integration-tests")
 ))]
 mod read_amplification;
+
+#[cfg(test)]
+mod tree_bytes;
 
 /// Type alias for the search tree index.
 pub type Index = dialog_artifacts::Index;

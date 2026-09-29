@@ -80,6 +80,7 @@ mod tests {
             edition: Edition::GENESIS,
             context: None,
             signature: Vec::new(),
+            prefetch: Vec::new(),
         };
         branch.reset(revision.clone()).perform(&provider).await?;
 

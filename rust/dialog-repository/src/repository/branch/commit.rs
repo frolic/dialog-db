@@ -227,7 +227,7 @@ where
                     }
                     .into());
                 }
-                return Ok(base);
+                return Ok(*base);
             }
             Outcome::Minted(minted) => *minted,
         };
@@ -295,7 +295,7 @@ where
             record,
             context,
         } = match minted {
-            Outcome::Unchanged(base) => return Ok(base),
+            Outcome::Unchanged(base) => return Ok(*base),
             Outcome::Minted(minted) => *minted,
         };
 
@@ -333,7 +333,7 @@ pub(crate) enum Outcome {
     /// asked for: nothing was minted or persisted, and the line keeps
     /// the revision it had. Only possible when there was a base
     /// revision to keep.
-    Unchanged(Revision),
+    Unchanged(Box<Revision>),
     /// A revision was minted and its blocks persisted.
     Minted(Box<Minted>),
 }
@@ -484,7 +484,7 @@ where
             && !self.allow_empty
             && let Some(base) = base_revision
         {
-            return Ok(Outcome::Unchanged(base));
+            return Ok(Outcome::Unchanged(Box::new(base)));
         }
 
         // Mint the revision (the placeholder tree root is replaced below,

@@ -143,6 +143,20 @@ pub struct Revision {
     /// root is only final at publish time) — see [`Revision::verify`].
     #[serde(default, with = "serde_bytes")]
     pub signature: Vec<u8>,
+
+    /// The nodes below the tree root that a reader holding none of the
+    /// tree reads first, named by the writer when it publishes the head:
+    /// the upper levels of the tree, or all of a small tree. A reader
+    /// fetches them together with the root, so the top of the tree costs
+    /// one round trip, not one per level.
+    ///
+    /// A hint, outside the signed payload: each block is checked against
+    /// its name when it arrives, and a reader reads a block only through
+    /// a link it opened from the signed root. A wrong name costs only
+    /// the bytes of a block that is never used. Empty on heads that name
+    /// nothing.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prefetch: Vec<TreeHash>,
 }
 
 impl Revision {
@@ -156,6 +170,7 @@ impl Revision {
             edition: Edition::GENESIS,
             context: None,
             signature: Vec::new(),
+            prefetch: Vec::new(),
         }
     }
 
@@ -180,6 +195,7 @@ impl Revision {
             edition: self.edition.successor(),
             context: None,
             signature: Vec::new(),
+            prefetch: Vec::new(),
         }
     }
 
@@ -206,6 +222,7 @@ impl Revision {
             edition: self.edition.max(upstream.edition).successor(),
             context: None,
             signature: Vec::new(),
+            prefetch: Vec::new(),
         }
     }
 

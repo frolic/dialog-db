@@ -3,24 +3,47 @@ use std::ops::Bound;
 use std::str::FromStr;
 
 use dialog_common::{Blake3Hash as NodeHash, ConditionalSync};
-use dialog_search_tree::ContentAddressedStorage as NodeStorage;
+use dialog_search_tree::{Buffer, ContentAddressedStorage as NodeStorage, PersistentNode};
 use dialog_storage::{Blake3Hash, DialogStorageError, StorageBackend};
 use futures_util::{Stream, StreamExt, TryStreamExt};
+use rkyv::deserialize;
+use rkyv::rancor::Error as RkyvError;
 
 use crate::Value;
 use crate::history::VersionExt as _;
+use crate::inspect::key_components;
 use crate::tree::ArtifactTreeExt as _;
 use crate::tree::{
     ArtifactTree, SPILL_LOOKAHEAD, SpillCache, TreeStorageBridge, fetch_spilled_cached, spill_cache,
 };
 use crate::{
-    Attribute, DialogArtifactsError, Entity, Key, State, history_claim_range, history_key_version,
-    history_region_range, history_version_range,
+    Attribute, AttributeKey, AttributeKeyPart, Datum, DialogArtifactsError, ENTITY_KEY_TAG, Entity,
+    EntityKeyPart, Key, KeyViewConstruct, KeyViewMut, State, history_claim_range,
+    history_key_version, history_region_range, history_version_range,
 };
 
 use super::{
-    Authorship, Claim, ClaimsDigest, History, REVISION_ATTRIBUTE, Record, RevisionRecord, Version,
+    Authorship, Claim, ClaimsDigest, Context, Edition, History, Origin, REVISION_ATTRIBUTE, Record,
+    RevisionRecord, Version,
 };
+
+/// The key ranges that a reader of one revision reads first, each as
+/// inclusive bounds: the revision's history records, its revision record,
+/// and the entity-ordered entry of each fact the revision wrote.
+///
+/// These are the reads that show the revision's facts with their author.
+/// Attribute-ordered and value-ordered reads of the facts are not in it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RevisionReads {
+    /// The revision.
+    pub version: Version,
+    /// The key ranges, inclusive at both ends.
+    pub ranges: Vec<(Key, Key)>,
+}
+
+/// The bytes of the version after the tag of a history key: the origin
+/// and the edition.
+const VERSION_BYTES: usize = super::VERSION_LENGTH;
 
 /// Which history records a [`TreeHistory::select`] scan covers.
 ///
@@ -247,6 +270,134 @@ where
             manifest,
             asserted,
         )))
+    }
+
+    /// The reads of the newest revisions in `context`, newest first: for
+    /// each origin, the revisions in the last `editions` editions up to its
+    /// watermark. A writer that names the tree nodes of these reads in its
+    /// head lets a reader show the newest facts with no second round trip.
+    ///
+    /// Editions order revisions across origins, because an edition is one
+    /// more than every edition its revision builds on.
+    pub async fn newest_reads(
+        &self,
+        context: &Context,
+        editions: u64,
+    ) -> Result<Vec<RevisionReads>, DialogArtifactsError> {
+        let mut reads = Vec::new();
+        for (origin, watermark) in context.iter() {
+            let top = watermark.edition.value();
+            let floor = top.saturating_sub(editions.saturating_sub(1));
+            reads.extend(self.reads_between(*origin, floor, top).await?);
+        }
+        reads.sort_by(|left, right| {
+            right
+                .version
+                .edition
+                .cmp(&left.version.edition)
+                .then(left.version.origin.cmp(&right.version.origin))
+        });
+        Ok(reads)
+    }
+
+    /// The versions of the facts in the entity-ordered leaf `node`, in
+    /// entry order, each once: the revisions whose authors a reader of the
+    /// leaf proves. Revision records are left out, because a reader reads
+    /// them only to prove an author. Any other node has none.
+    pub async fn fact_versions(
+        &self,
+        node: &NodeHash,
+    ) -> Result<Vec<Version>, DialogArtifactsError> {
+        let mut versions = Vec::new();
+        let Some(bytes) = self.storage.retrieve(node).await? else {
+            return Ok(versions);
+        };
+        let node =
+            PersistentNode::<Key, State<Datum>>::open(Buffer::from(bytes), self.storage.codec())?;
+        let Ok(segment) = node.as_segment() else {
+            return Ok(versions);
+        };
+        let mut keys = segment.keys::<Key>()?;
+        while let Some((at, key)) = keys.next_key()? {
+            if key.first() != Some(&ENTITY_KEY_TAG) {
+                continue;
+            }
+            let revision_record = key_components(key)
+                .iter()
+                .any(|part| part.kind == "attribute" && part.text == REVISION_ATTRIBUTE);
+            if revision_record {
+                continue;
+            }
+            let state: State<Datum> = deserialize::<State<Datum>, RkyvError>(segment.value_at(at)?)
+                .map_err(|error| DialogArtifactsError::Tree(format!("entry decode: {error}")))?;
+            if let State::Added(datum) = state {
+                for version in datum.versions() {
+                    if !versions.contains(version) {
+                        versions.push(*version);
+                    }
+                }
+            }
+        }
+        Ok(versions)
+    }
+
+    /// The reads of the revisions of `origin` from edition `floor` to
+    /// edition `top`, both included, in edition order.
+    async fn reads_between(
+        &self,
+        origin: Origin,
+        floor: u64,
+        top: u64,
+    ) -> Result<Vec<RevisionReads>, DialogArtifactsError> {
+        let mut reads = Vec::new();
+        if floor > top {
+            return Ok(reads);
+        }
+        let (min, _) = history_version_range(&Version::new(origin, Edition::new(floor)));
+        let (_, max) = history_version_range(&Version::new(origin, Edition::new(top)));
+        let stream = self
+            .tree
+            .stream_range((Bound::Included(min), Bound::Excluded(max)), &self.storage);
+        tokio::pin!(stream);
+        let mut current: Option<RevisionReads> = None;
+        while let Some(entry) = stream.try_next().await? {
+            let version = history_key_version(&entry.key)?;
+            if current.as_ref().map(|reads| reads.version) != Some(version) {
+                reads.extend(current.take());
+                current = Some(self.author_reads(version)?);
+            }
+            // A history key is the tag and the version, then the same bytes
+            // as the fact's entity-ordered key after its tag.
+            let bytes: &[u8] = entry.key.as_ref();
+            let mut entity_key = vec![ENTITY_KEY_TAG];
+            entity_key.extend_from_slice(bytes.get(1 + VERSION_BYTES..).unwrap_or_default());
+            let entity_key = Key::from(entity_key);
+            if let Some(current) = current.as_mut() {
+                current.ranges.push((entity_key.clone(), entity_key));
+            }
+        }
+        reads.extend(current);
+        Ok(reads)
+    }
+
+    /// The reads that prove who wrote the facts of `version`: its history
+    /// records and its revision record. The facts themselves are not in it.
+    pub fn author_reads(&self, version: Version) -> Result<RevisionReads, DialogArtifactsError> {
+        let (min, max) = history_version_range(&version);
+        let of = version.entity();
+        let the = Attribute::from_str(REVISION_ATTRIBUTE)?;
+        let record_start = <AttributeKey<Key> as KeyViewConstruct>::min()
+            .set_attribute(AttributeKeyPart::from(&the))
+            .set_entity(EntityKeyPart::from(&of))
+            .into_key();
+        let record_end = <AttributeKey<Key> as KeyViewConstruct>::max()
+            .set_attribute(AttributeKeyPart::from(&the))
+            .set_entity(EntityKeyPart::from(&of))
+            .into_key();
+        Ok(RevisionReads {
+            version,
+            ranges: vec![(min, max), (record_start, record_end)],
+        })
     }
 
     /// The [`ClaimsDigest`] of the history records under `version`, as a

@@ -166,6 +166,9 @@ pub use node::*;
 mod storage;
 pub use storage::*;
 
+mod top;
+pub use top::*;
+
 mod traversal;
 pub use traversal::*;
 

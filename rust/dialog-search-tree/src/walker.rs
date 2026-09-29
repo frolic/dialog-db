@@ -356,6 +356,9 @@ where
         > + ConditionalSync,
 {
     root: Blake3Hash,
+    /// How many entries the caller reads at most, when it says so. A
+    /// scan reads ahead only as far as this reaches.
+    reach: Option<u64>,
 
     key: PhantomData<Key>,
     value: PhantomData<Value>,
@@ -374,10 +377,23 @@ where
     pub fn new(root: Blake3Hash) -> Self {
         Self {
             root,
+            reach: None,
 
             key: PhantomData,
             value: PhantomData,
         }
+    }
+
+    /// Tells a scan that its caller reads at most `entries` entries.
+    ///
+    /// A scan reads the siblings of a node ahead of the walk, so that a
+    /// long scan fetches them in one wave. A caller that stops early does
+    /// not use most of them. With a reach, a scan reads ahead only the
+    /// siblings that the reach can still get to, by the entry counts that
+    /// the index node keeps for each child.
+    pub fn reach(mut self, entries: u64) -> Self {
+        self.reach = Some(entries);
+        self
     }
 
     /// Returns a stream of entries within the specified key range.
@@ -454,6 +470,8 @@ where
             };
             let mut search_path = search_result.into_indexed();
             let mut entered_range = false;
+            let mut yielded: u64 = 0;
+            let reach = self.reach;
             let mut warming = FuturesUnordered::new();
             let mut queued = HashSet::new();
 
@@ -492,10 +510,26 @@ where
                             Bound::Excluded(bound) => Bound::Excluded(bound.as_ref()),
                             Bound::Unbounded => Bound::Unbounded,
                         })?;
+                        // A scan with a reach reads ahead only while the
+                        // entries of the child it enters and the siblings
+                        // before it are fewer than the entries it still
+                        // wants.
+                        let mut ahead = match reach {
+                            Some(_) => index.scale_at(child_index)?.estimate(),
+                            None => 0,
+                        };
                         for sibling in (child_index + 1)..visitable {
+                            if let Some(reach) = reach
+                                && ahead >= reach.saturating_sub(yielded)
+                            {
+                                break;
+                            }
                             let hash = index.hash_at(sibling)?.clone();
                             if queued.insert(hash.clone()) {
                                 warming.push(accessor.warm(hash));
+                            }
+                            if reach.is_some() {
+                                ahead = ahead.saturating_add(index.scale_at(sibling)?.estimate());
                             }
                         }
 
@@ -583,6 +617,7 @@ where
                             if let NoveltyOp::Assert(value) = op {
                                 entered_range = true;
                                 let entry_key = Out::from_entry_bytes(&buffered_key)?;
+                                yielded += 1;
                                 yield Entry { key: entry_key, value };
                             }
                         }
@@ -593,6 +628,7 @@ where
                             if let NoveltyOp::Assert(value) = op {
                                 entered_range = true;
                                 let entry_key = Out::from_entry_bytes(&buffered_key)?;
+                                yielded += 1;
                                 yield Entry { key: entry_key, value };
                             }
                             continue;
@@ -617,7 +653,8 @@ where
                             // `KeyHandle` consumer borrows it copy-free; the
                             // typed consumer copies out, as before.
                             let entry_key = Out::from_arena(&keys, at)?;
-                            yield Entry { key: entry_key, value };
+                            yielded += 1;
+                                yield Entry { key: entry_key, value };
                         // Entries only ascend, so a key past the range's end
                         // ends the walk. The `past_end_bytes` half must NOT be
                         // gated on `entered_range`: a scan whose range hits no
@@ -643,6 +680,7 @@ where
                             if let NoveltyOp::Assert(value) = op {
                                 entered_range = true;
                                 let entry_key = Out::from_entry_bytes(&buffered_key)?;
+                                yielded += 1;
                                 yield Entry { key: entry_key, value };
                             }
                         }
@@ -653,6 +691,7 @@ where
                             if let NoveltyOp::Assert(value) = op {
                                 entered_range = true;
                                 let entry_key = Out::from_entry_bytes(&buffered_key)?;
+                                yielded += 1;
                                 yield Entry { key: entry_key, value };
                             }
                             continue;
@@ -663,7 +702,8 @@ where
                             entered_range = true;
                             let value = into_owned(segment.value_at(at)?)?;
                             let entry_key = Out::from_entry_bytes(key)?;
-                            yield Entry { key: entry_key, value };
+                            yielded += 1;
+                                yield Entry { key: entry_key, value };
                         // See the memoized arm above: the `past_end_bytes`
                         // half must not be gated on `entered_range`, or a
                         // range matching no stored entry walks the rest of
@@ -681,7 +721,8 @@ where
                     if let NoveltyOp::Assert(value) = op {
                         entered_range = true;
                         let entry_key = Out::from_entry_bytes(&buffered_key)?;
-                        yield Entry { key: entry_key, value };
+                        yielded += 1;
+                                yield Entry { key: entry_key, value };
                     }
                 }
             }
@@ -1464,6 +1505,68 @@ mod prefetch_tests {
             "a leaf-narrow range scan reads the descent path and nothing beside it"
         );
 
+        Ok(())
+    }
+
+    /// A scan whose caller reads only a few entries reads ahead only as
+    /// far as those entries reach. A page that runs a little past the
+    /// first leaf reads the path to that leaf and the next leaf, and no
+    /// other sibling. A reach that covers the range reads ahead as an
+    /// unbounded scan does.
+    #[dialog_common::test]
+    async fn it_reads_ahead_only_as_far_as_its_reach() -> Result<()> {
+        use futures_util::StreamExt as _;
+
+        let mut storage = ContentAddressedStorage::new(ObservingBackend::new());
+        let tree = built_tree(&mut storage).await?;
+        let backend = storage.backend().clone();
+
+        let root = load(&storage, tree.root()).await?;
+        let ArchivedNodeBody::Index(index) = root.body() else {
+            anyhow::bail!("the built tree has a single leaf")
+        };
+        assert!(index.len() > 3, "the root has siblings to read ahead");
+        let mut first = index.hash_at(0)?.clone();
+        let mut second = index.hash_at(1)?.clone();
+        let first_leaf = loop {
+            let node = load(&storage, &first).await?;
+            match node.body() {
+                ArchivedNodeBody::Index(index) => {
+                    second = index.hash_at(1)?.clone();
+                    first = index.hash_at(0)?.clone();
+                }
+                ArchivedNodeBody::Segment(segment) => break segment.len(),
+            }
+        };
+        let page = first_leaf + 5;
+
+        let page_tree = Tree::from_hash(tree.root().clone());
+        backend.reset();
+        let rows: Vec<_> = page_tree
+            .stream_range_handles_reaching(.., &storage, Some(page as u64))
+            .take(page)
+            .try_collect()
+            .await?;
+        assert_eq!(rows.len(), page);
+        let reads: HashSet<_> = backend.read_log().into_iter().collect();
+        assert!(reads.contains(&first) && reads.contains(&second));
+        assert_eq!(
+            reads.len(),
+            3,
+            "a page reads the root, its first leaf, and the next leaf only"
+        );
+
+        let whole_tree = Tree::from_hash(tree.root().clone());
+        backend.reset();
+        let whole: Vec<_> = whole_tree
+            .stream_range_handles_reaching(.., &storage, Some(u64::from(ENTRIES)))
+            .try_collect()
+            .await?;
+        assert_eq!(whole.len() as u32, ENTRIES);
+        assert!(
+            backend.peak_reads_in_flight() > 1,
+            "a reach that covers the range reads siblings ahead"
+        );
         Ok(())
     }
 
