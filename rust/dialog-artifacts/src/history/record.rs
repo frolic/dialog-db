@@ -71,7 +71,6 @@ impl Record {
         };
         let datum = Datum {
             cause: None,
-            meta: Vec::new(),
             blob: None,
             version: Some(*version),
             collapsed: Vec::new(),
@@ -103,7 +102,6 @@ impl Record {
             collapsed: Vec::new(),
             supersedes: claim.cause.versions().to_vec(),
             retraction: !self.is_assertion(),
-            meta: Vec::new(),
         };
         Some((key, State::Added(datum)))
     }

@@ -34,11 +34,13 @@ pub struct Datum {
     /// The [`Cause`] of this fact, if any: a reference to an ancestor version
     /// with a different [`Value`].
     pub cause: Option<Cause>,
-    /// An opaque record carried ONLY by the blob index
-    /// ([`BlobRecord`](crate::BlobRecord)), never by an EAV/AEV/VAE fact. Blob
-    /// keys occupy a tag range disjoint from the fact indexes, so a blob
-    /// entry's `Datum` is never seen by the fact scan; this field is its
-    /// storage. It is NOT the raw bytes of a spilled value — those live as a
+    /// Opaque bytes the entry carries. A blob index entry keeps its
+    /// [`BlobRecord`](crate::BlobRecord) here. Blob keys occupy a tag range
+    /// disjoint from the fact indexes, so a blob entry's `Datum` is never
+    /// seen by the fact scan. An EAV/AEV/VAE fact keeps the metadata of its
+    /// claims here (see [`Datum::claim_meta`]), and `None` when no claim
+    /// carries any, so an entry without metadata costs nothing and reads as
+    /// before. It is NOT the raw bytes of a spilled value — those live as a
     /// content-addressed block in the archive, keyed by the key's 32-byte
     /// reference.
     pub blob: Option<Vec<u8>>,
@@ -70,11 +72,6 @@ pub struct Datum {
     /// value rather than asserting it. Always `false` on index data.
     #[serde(default)]
     pub retraction: bool,
-    /// The [`Artifact::meta`] of each claim, in the order of
-    /// [`Datum::versions`]: the primary claim first, or the only claim of
-    /// unversioned data. Empty when no claim carries any.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub meta: Vec<Option<Vec<u8>>>,
 }
 
 impl Datum {
@@ -84,26 +81,37 @@ impl Datum {
     pub fn for_artifact(artifact: &Artifact) -> Self {
         Self {
             cause: artifact.cause.clone(),
-            blob: None,
+            blob: encode_claim_meta(std::slice::from_ref(&artifact.meta)),
             version: None,
             collapsed: Vec::new(),
             supersedes: Vec::new(),
             retraction: false,
-            meta: artifact.meta.iter().cloned().map(Some).collect(),
         }
     }
 
-    /// The metadata of the primary claim.
-    pub fn primary_meta(&self) -> Option<&[u8]> {
-        self.meta.first()?.as_deref()
+    /// The [`Artifact::meta`] of each claim of a fact entry, in the order
+    /// of [`Datum::versions`]: the primary claim first, or the only claim of
+    /// unversioned data. Shorter than the claims when the last ones carry
+    /// none.
+    pub fn claim_meta(&self) -> Vec<Option<Vec<u8>>> {
+        self.blob
+            .as_deref()
+            .map(decode_claim_meta)
+            .unwrap_or_default()
+    }
+
+    /// The metadata of the primary claim of a fact entry.
+    pub fn primary_meta(&self) -> Option<Vec<u8>> {
+        self.claim_meta().into_iter().next().flatten()
     }
 
     /// Each claim this entry stands for, with its metadata, in version
     /// order. Empty for unversioned data.
     fn claims(&self) -> Vec<(Version, Option<Vec<u8>>)> {
+        let meta = self.claim_meta();
         self.versions()
             .enumerate()
-            .map(|(index, version)| (*version, self.meta.get(index).cloned().flatten()))
+            .map(|(index, version)| (*version, meta.get(index).cloned().flatten()))
             .collect()
     }
 
@@ -116,14 +124,11 @@ impl Datum {
             (left.0, left.1.is_none(), &left.1).cmp(&(right.0, right.1.is_none(), &right.1))
         });
         claims.dedup_by(|later, earlier| later.0 == earlier.0);
-        let (versions, mut meta): (Vec<_>, Vec<_>) = claims.into_iter().unzip();
+        let (versions, meta): (Vec<_>, Vec<_>) = claims.into_iter().unzip();
         let mut versions = versions.into_iter();
         self.version = versions.next().or(self.version);
         self.collapsed = versions.collect();
-        while meta.last().is_some_and(Option::is_none) {
-            meta.pop();
-        }
-        self.meta = meta;
+        self.blob = encode_claim_meta(&meta);
     }
 
     /// Fold `other`'s claims, with their metadata, into this entry. The two
@@ -192,6 +197,48 @@ impl Datum {
 }
 
 impl ValueType for Datum {}
+
+/// The bytes that hold each claim's metadata: per claim, `0` for none, or
+/// `1`, a little-endian `u32` length, and the bytes. `None` when no claim
+/// carries any, so trailing claims without metadata take no bytes.
+fn encode_claim_meta(meta: &[Option<Vec<u8>>]) -> Option<Vec<u8>> {
+    let carried = meta.iter().rposition(Option::is_some)? + 1;
+    let mut bytes = Vec::new();
+    for claim in &meta[..carried] {
+        match claim {
+            None => bytes.push(0),
+            Some(claim) => {
+                bytes.push(1);
+                bytes.extend_from_slice(&(claim.len() as u32).to_le_bytes());
+                bytes.extend_from_slice(claim);
+            }
+        }
+    }
+    Some(bytes)
+}
+
+/// The metadata [`encode_claim_meta`] wrote. Bytes that end early read as
+/// the claims before them.
+fn decode_claim_meta(mut bytes: &[u8]) -> Vec<Option<Vec<u8>>> {
+    let mut meta = Vec::new();
+    while let Some((&flag, rest)) = bytes.split_first() {
+        if flag == 0 {
+            meta.push(None);
+            bytes = rest;
+            continue;
+        }
+        let Some((length, rest)) = rest.split_first_chunk::<4>() else {
+            break;
+        };
+        let length = u32::from_le_bytes(*length) as usize;
+        let Some((claim, rest)) = rest.split_at_checked(length) else {
+            break;
+        };
+        meta.push(Some(claim.to_vec()));
+        bytes = rest;
+    }
+    meta
+}
 
 #[cfg(test)]
 mod tests;

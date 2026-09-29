@@ -710,7 +710,6 @@ mod tests {
             collapsed: Vec::new(),
             supersedes: Vec::new(),
             retraction: false,
-            meta: Vec::new(),
         };
         let entries = vec![Entry {
             key,

@@ -2625,13 +2625,10 @@ mod tests {
         // (every fact is a distinct entity, which is the worst case for the
         // history region: nothing shares a lineage). The guard tracks the
         // combined figure — the number that matters is the one users pay.
-        // Claim metadata adds 8 B/entry when no claim carries any (192 to
-        // 200 on this fixture).
         assert!(
-            bytes_per_entry < 208.0,
+            bytes_per_entry < 200.0,
             "per-entry size regressed to {bytes_per_entry:.1} bytes/entry \
-             (value-in-key alone is 118, with version control ~192, with \
-             empty claim metadata ~200)"
+             (value-in-key alone is 118, with version control ~186)"
         );
 
         Ok(())
