@@ -94,8 +94,7 @@ impl BlobRecord {
             collapsed: Vec::new(),
             supersedes: Vec::new(),
             retraction: false,
-            meta: None,
-            collapsed_meta: Vec::new(),
+            meta: Vec::new(),
         })
     }
 

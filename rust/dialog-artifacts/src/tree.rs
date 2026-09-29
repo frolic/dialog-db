@@ -89,9 +89,8 @@ impl TreeValue for State<Datum> {
                     + datum.version.as_ref().map_or(0, |_| 48)
                     + 48 * (datum.collapsed.len() + datum.supersedes.len())
                     + datum.blob.as_ref().map_or(0, |blob| 16 + blob.len())
-                    + datum.meta.as_ref().map_or(0, |meta| 16 + meta.len())
                     + datum
-                        .collapsed_meta
+                        .meta
                         .iter()
                         .map(|meta| 8 + meta.as_ref().map_or(0, Vec::len))
                         .sum::<usize>()
@@ -2350,8 +2349,7 @@ mod corrupt_row_tests {
                         collapsed: vec![],
                         supersedes: vec![],
                         retraction: false,
-                        meta: None,
-                        collapsed_meta: Vec::new(),
+                        meta: Vec::new(),
                     }),
                 ));
             }

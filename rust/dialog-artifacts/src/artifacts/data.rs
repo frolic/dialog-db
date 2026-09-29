@@ -70,14 +70,11 @@ pub struct Datum {
     /// value rather than asserting it. Always `false` on index data.
     #[serde(default)]
     pub retraction: bool,
-    /// The [`Artifact::meta`] of the primary claim: the claim at
-    /// [`Datum::version`], or the only claim of unversioned data.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub meta: Option<Vec<u8>>,
-    /// The metadata of each collapsed claim, in the order of
-    /// [`Datum::collapsed`]. Empty when no collapsed claim carries any.
+    /// The [`Artifact::meta`] of each claim, in the order of
+    /// [`Datum::versions`]: the primary claim first, or the only claim of
+    /// unversioned data. Empty when no claim carries any.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub collapsed_meta: Vec<Option<Vec<u8>>>,
+    pub meta: Vec<Option<Vec<u8>>>,
 }
 
 impl Datum {
@@ -92,43 +89,41 @@ impl Datum {
             collapsed: Vec::new(),
             supersedes: Vec::new(),
             retraction: false,
-            meta: artifact.meta.clone(),
-            collapsed_meta: Vec::new(),
+            meta: artifact.meta.iter().cloned().map(Some).collect(),
         }
+    }
+
+    /// The metadata of the primary claim.
+    pub fn primary_meta(&self) -> Option<&[u8]> {
+        self.meta.first()?.as_deref()
     }
 
     /// Each claim this entry stands for, with its metadata, in version
     /// order. Empty for unversioned data.
     fn claims(&self) -> Vec<(Version, Option<Vec<u8>>)> {
-        let mut claims = Vec::new();
-        if let Some(version) = self.version {
-            claims.push((version, self.meta.clone()));
-        }
-        for (index, version) in self.collapsed.iter().enumerate() {
-            let meta = self.collapsed_meta.get(index).cloned().flatten();
-            claims.push((*version, meta));
-        }
-        claims
+        self.versions()
+            .enumerate()
+            .map(|(index, version)| (*version, self.meta.get(index).cloned().flatten()))
+            .collect()
     }
 
     /// Stands this entry on `claims` in canonical form: sorted by version,
     /// one claim per version, the smallest primary. Two copies of one claim
-    /// keep the smaller metadata, so every replica writes the same bytes.
+    /// keep the metadata one of them carries (the smaller when both do), so
+    /// every replica writes the same bytes.
     fn set_claims(&mut self, mut claims: Vec<(Version, Option<Vec<u8>>)>) {
-        claims.sort();
+        claims.sort_by(|left, right| {
+            (left.0, left.1.is_none(), &left.1).cmp(&(right.0, right.1.is_none(), &right.1))
+        });
         claims.dedup_by(|later, earlier| later.0 == earlier.0);
-        let mut claims = claims.into_iter();
-        if let Some((version, meta)) = claims.next() {
-            self.version = Some(version);
-            self.meta = meta;
+        let (versions, mut meta): (Vec<_>, Vec<_>) = claims.into_iter().unzip();
+        let mut versions = versions.into_iter();
+        self.version = versions.next().or(self.version);
+        self.collapsed = versions.collect();
+        while meta.last().is_some_and(Option::is_none) {
+            meta.pop();
         }
-        let (collapsed, collapsed_meta): (Vec<_>, Vec<_>) = claims.unzip();
-        self.collapsed = collapsed;
-        self.collapsed_meta = if collapsed_meta.iter().all(Option::is_none) {
-            Vec::new()
-        } else {
-            collapsed_meta
-        };
+        self.meta = meta;
     }
 
     /// Fold `other`'s claims, with their metadata, into this entry. The two

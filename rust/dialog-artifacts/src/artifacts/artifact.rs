@@ -179,7 +179,7 @@ impl Artifact {
             of,
             is: Value::String("<spilled value>".to_string()),
             cause: datum.cause.clone(),
-            meta: datum.meta.clone(),
+            meta: datum.primary_meta().map(<[u8]>::to_vec),
         })
     }
 }
@@ -573,7 +573,7 @@ fn reconstruct(
         of,
         is,
         cause: datum.cause.clone(),
-        meta: datum.meta.clone(),
+        meta: datum.primary_meta().map(<[u8]>::to_vec),
     })
 }
 
@@ -650,8 +650,7 @@ mod tests {
                 collapsed: vec![],
                 supersedes: vec![],
                 retraction: false,
-                meta: None,
-                collapsed_meta: Vec::new(),
+                meta: Vec::new(),
             },
             None,
         )

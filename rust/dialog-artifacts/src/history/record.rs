@@ -70,9 +70,8 @@ impl Record {
             Record::Assert(claim) | Record::Retract(claim) => claim,
         };
         let datum = Datum {
-            collapsed_meta: Vec::new(),
             cause: None,
-            meta: None,
+            meta: Vec::new(),
             blob: None,
             version: Some(*version),
             collapsed: Vec::new(),
@@ -104,8 +103,7 @@ impl Record {
             collapsed: Vec::new(),
             supersedes: claim.cause.versions().to_vec(),
             retraction: !self.is_assertion(),
-            meta: None,
-            collapsed_meta: Vec::new(),
+            meta: Vec::new(),
         };
         Some((key, State::Added(datum)))
     }

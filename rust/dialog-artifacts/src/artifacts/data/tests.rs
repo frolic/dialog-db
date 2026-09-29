@@ -16,8 +16,7 @@ fn claim(version: Version, meta: &[u8]) -> Datum {
         collapsed: Vec::new(),
         supersedes: Vec::new(),
         retraction: false,
-        meta: Some(meta.to_vec()),
-        collapsed_meta: Vec::new(),
+        meta: vec![Some(meta.to_vec())],
     }
 }
 
@@ -35,9 +34,11 @@ fn it_keeps_each_claims_metadata_in_either_order() {
 
     assert_eq!(first, second);
     assert_eq!(first.version, Some(version(1, 3)));
-    assert_eq!(first.meta.as_deref(), Some(b"alice".as_slice()));
     assert_eq!(first.collapsed, vec![version(2, 5)]);
-    assert_eq!(first.collapsed_meta, vec![Some(b"bob".to_vec())]);
+    assert_eq!(
+        first.meta,
+        vec![Some(b"alice".to_vec()), Some(b"bob".to_vec())]
+    );
 }
 
 /// Retiring the primary claim leaves the other claim with its own
@@ -60,6 +61,6 @@ fn it_folds_a_bare_version_without_metadata() {
     entry.absorb_versions([&version(1, 3)]);
 
     assert_eq!(entry.version, Some(version(1, 3)));
-    assert_eq!(entry.meta, None);
-    assert_eq!(entry.collapsed_meta, vec![Some(b"bob".to_vec())]);
+    assert_eq!(entry.primary_meta(), None);
+    assert_eq!(entry.meta, vec![None, Some(b"bob".to_vec())]);
 }
