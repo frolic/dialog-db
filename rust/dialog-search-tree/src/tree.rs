@@ -498,8 +498,10 @@ where
         Backend: StorageBackend<Key = Blake3Hash, Value = Vec<u8>, Error = DialogStorageError>
             + ConditionalSync,
     {
+        // An empty tree has no node to carry its format, so it takes the
+        // format of a new tree in this storage.
         if &self.root == NULL_BLAKE3_HASH {
-            return Ok(Manifest::default());
+            return Ok(Manifest::for_codec(storage.codec()));
         }
         let accessor = Accessor::new(self.node_cache.clone(), storage.clone());
         let node: PersistentNode<Key, Value> = accessor.get_node(&self.root).await?;
@@ -545,10 +547,9 @@ where
     ///
     /// Because recovering a tree's real manifest means loading its root node,
     /// which is async, this entry cannot do it and assumes the defaults. It is
-    /// therefore only sound for a tree whose manifest IS [`Manifest::default`]
-    /// (which today is every tree, since nothing constructs another). Editing a
-    /// non-default tree through this entry rewrites the touched path under the
-    /// default format. Use [`edit_with_manifest`](Self::edit_with_manifest)
+    /// therefore only sound for a tree whose manifest is [`Manifest::default`].
+    /// A sealed tree uses [`Manifest::sealed`], and an edit of it through this
+    /// entry fails when it loads the root. Use [`edit_with_manifest`](Self::edit_with_manifest)
     /// whenever the caller can await.
     pub fn edit(&self) -> TransientTree<Key, Value, D> {
         TransientTree::new(self.root.clone(), self.node_cache.clone())

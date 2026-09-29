@@ -322,3 +322,65 @@ async fn it_syncs_sealed_blobs_through_an_fs_remote() -> Result<()> {
     assert_vault_is_sealed(&location, &marker).await?;
     Ok(())
 }
+
+/// The head a sealed branch pushes names its tree root and the nodes a first
+/// read fetches, which are names of sealed blocks. The rest of it, the
+/// issuer, branch, edition, causal context, and signature, is sealed.
+#[dialog_common::test]
+async fn it_seals_the_head_it_pushes_apart_from_the_blocks_a_first_read_fetches() -> Result<()> {
+    use dialog_capability::Subject;
+    use dialog_repository::{HeadBlocks, RepositoryMemoryExt as _};
+    use dialog_storage::{CborEncoder, Encoder as _};
+    use serde::de::IgnoredAny;
+    use std::collections::BTreeMap;
+
+    let (operator, profile) = test_operator_with_profile().await;
+    let (alice, location, alice_branch) =
+        sealed_repo_with_fs_remote(&operator, &profile, "fs-sealed-head", key(7)).await?;
+    let notes = (0..100)
+        .map(|index| note(&format!("note:{index}"), &format!("note {index}")))
+        .collect::<Result<Vec<_>>>()?;
+    alice_branch
+        .commit(stream::iter(notes))
+        .perform(&operator)
+        .await?;
+    alice_branch.push().perform(&operator).await?;
+    let pushed = alice_branch.revision().expect("a pushed head");
+
+    // The head as the remote stores it.
+    let vault = FileSystem::open(&location).await?;
+    let stored = Subject::from(alice.did())
+        .branch("main")
+        .revision()
+        .resolve()
+        .effect
+        .perform(&vault)
+        .await?
+        .expect("the remote holds a head")
+        .content;
+
+    let fields: BTreeMap<String, IgnoredAny> = CborEncoder.decode(&stored).await?;
+    let names: Vec<&str> = fields.keys().map(String::as_str).collect();
+    assert_eq!(names, ["prefetch", "sealed", "tree"]);
+    let text = String::from_utf8_lossy(&stored);
+    assert!(
+        !text.contains(&pushed.issuer.to_string()),
+        "the issuer is sealed"
+    );
+    assert!(!text.contains("branch"), "the branch is sealed");
+    assert!(
+        !stored
+            .windows(pushed.signature.len())
+            .any(|window| window == pushed.signature.as_slice()),
+        "the signature is sealed"
+    );
+    let blocks = HeadBlocks::read(&stored).await?;
+    assert_eq!(blocks.tree, pushed.tree);
+    assert!(!blocks.prefetch.is_empty());
+
+    // A replica with the key reads the head and the tree it names.
+    let bob_branch = replica(&operator, &profile, &alice, location, Some(key(7))).await?;
+    assert!(bob_branch.pull().perform(&operator).await?.is_some());
+    assert_eq!(read_notes(&bob_branch, &operator).await?.len(), 100);
+    Ok(())
+}

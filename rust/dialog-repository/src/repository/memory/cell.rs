@@ -224,7 +224,18 @@ pub struct Cell<T, Codec: Clone = CborEncoder> {
     cache: Cache<T, Codec>,
 }
 
-impl<T> Cell<T> {
+impl<T, Codec: Clone> Cell<T, Codec> {
+    /// A cell whose content is encoded with `codec`.
+    pub fn encoded_with(capability: CellScope, codec: Codec) -> Self {
+        Self {
+            capability,
+            cache: Cache {
+                codec,
+                state: SharedState::default(),
+            },
+        }
+    }
+
     /// Returns the name of this cell.
     pub fn name(&self) -> &str {
         self.capability.cell_name()

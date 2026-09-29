@@ -4,7 +4,9 @@
 //! so the size of those blocks is the cost of a first screen. This
 //! module builds a tree the way a photo feed writes it (one post per
 //! commit), and prints where its bytes are: the root, the other index
-//! nodes, and the leaves, split by the index each entry belongs to.
+//! nodes, and the leaves, split by the index each entry belongs to. It
+//! also counts the blocks a first screen reads that the head does not
+//! name, since each is one more round trip.
 //!
 //! Not part of the regular suite. Run it explicitly, in release, with
 //! output:
@@ -14,16 +16,19 @@
 //! ```
 
 use std::collections::{BTreeMap, HashSet};
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
-use dialog_artifacts::inspect::{inspect_node, key_components};
-use dialog_artifacts::tree::TreeStorageBridge;
-use dialog_artifacts::{Artifact, Datum, Instruction, Key, State, Value};
+use dialog_artifacts::history::TreeHistory;
+use dialog_artifacts::inspect::key_components;
+use dialog_artifacts::tree::{ArtifactTree, ArtifactTreeExt as _, TreeStorageBridge, spill_cache};
+use dialog_artifacts::{Artifact, ArtifactSelector, Datum, Instruction, Key, State, Value};
 use dialog_common::{Blake3Hash as NodeHash, Buffer, ConditionalSync};
+use dialog_crypto::{BlockCodec, SealKey};
 use dialog_operator::helpers::{test_operator_with_profile, unique_name};
 use dialog_search_tree::{ArchivedNodeBody, ContentAddressedStorage, PersistentNode};
 use dialog_storage::{DialogStorageError, StorageBackend};
-use futures_util::stream;
+use futures_util::{TryStreamExt as _, stream};
 use rkyv::rancor::Error as RkyvError;
 
 use crate::{LocalIndex, RepositoryExt as _};
@@ -150,7 +155,10 @@ where
             let Some(bytes) = storage.retrieve(&hash).await? else {
                 continue;
             };
-            let node = PersistentNode::<Key, State<Datum>>::try_from(Buffer::from(bytes.clone()))?;
+            let node = PersistentNode::<Key, State<Datum>>::open(
+                Buffer::from(bytes.clone()),
+                storage.codec(),
+            )?;
             if let ArchivedNodeBody::Index(index) = node.body() {
                 next.extend(index.links()?.into_iter().map(|link| link.node));
             }
@@ -162,16 +170,18 @@ where
     Ok(nodes)
 }
 
-fn break_down(nodes: &[(usize, NodeHash, Vec<u8>)]) -> Result<Breakdown> {
+fn break_down(nodes: &[(usize, NodeHash, Vec<u8>)], codec: &BlockCodec) -> Result<Breakdown> {
     let mut breakdown = Breakdown::default();
     for (depth, _, bytes) in nodes {
         breakdown.levels = breakdown.levels.max(depth + 1);
-        let summary = inspect_node(bytes.clone())?;
+        let node = PersistentNode::<Key, State<Datum>>::open(Buffer::from(bytes.clone()), codec)?;
         if *depth == 0 {
             breakdown.root = bytes.len();
-            breakdown.root_novelty = summary.novelty as usize;
         }
-        if summary.kind == "index" {
+        if let Ok(index) = node.as_index() {
+            if *depth == 0 {
+                breakdown.root_novelty = index.novelty_len();
+            }
             if *depth > 0 {
                 breakdown.index_nodes += 1;
                 breakdown.index_bytes += bytes.len();
@@ -182,7 +192,6 @@ fn break_down(nodes: &[(usize, NodeHash, Vec<u8>)]) -> Result<Breakdown> {
             breakdown.leaves += 1;
             breakdown.leaf_bytes += bytes.len();
         }
-        let node = PersistentNode::<Key, State<Datum>>::try_from(Buffer::from(bytes.clone()))?;
         let segment = node.as_segment()?;
         let mut cursor = segment.keys::<Key>()?;
         let mut raw: BTreeMap<&'static str, usize> = BTreeMap::new();
@@ -204,13 +213,14 @@ fn break_down(nodes: &[(usize, NodeHash, Vec<u8>)]) -> Result<Breakdown> {
     Ok(breakdown)
 }
 
-/// Builds a repository with a name and `posts` posts, one commit each,
-/// and prints where the bytes of its tree are.
+/// Builds a sealed repository with a name and `posts` posts, one commit
+/// each, and prints where the bytes of its tree are.
 async fn measure(posts: u64) -> Result<String> {
     let (operator, profile) = test_operator_with_profile().await;
     let repository = profile
         .repository(unique_name("tree-bytes"))
         .open()
+        .sealed(SealKey::from([7; 32]))
         .perform(&operator)
         .await?;
     let branch = repository.branch("main").open().perform(&operator).await?;
@@ -231,6 +241,7 @@ async fn measure(posts: u64) -> Result<String> {
         .await?;
     let mut seen = HashSet::new();
     let mut written = 0;
+    let mut roots = 0;
     let start = 1_767_225_600_000u64;
     for index in 0..posts {
         let facts = post(start + index * 3_600_000, index);
@@ -240,7 +251,10 @@ async fn measure(posts: u64) -> Result<String> {
             .perform(&operator)
             .await?;
         let root = NodeHash::from(*branch.revision().expect("a head").tree.hash());
-        for (_, hash, bytes) in read_tree(&root, &storage).await? {
+        for (depth, hash, bytes) in read_tree(&root, &storage).await? {
+            if depth == 0 {
+                roots += bytes.len();
+            }
             if seen.insert(hash) {
                 written += bytes.len();
             }
@@ -258,7 +272,7 @@ async fn measure(posts: u64) -> Result<String> {
             .unwrap_or_default();
         named_bytes += block.len();
     }
-    let breakdown = break_down(&nodes)?;
+    let breakdown = break_down(&nodes, storage.codec())?;
     let total = breakdown.root + breakdown.index_bytes + breakdown.leaf_bytes;
     let regions = breakdown
         .regions
@@ -273,7 +287,7 @@ async fn measure(posts: u64) -> Result<String> {
         .collect::<Vec<_>>()
         .join(", ");
     Ok(format!(
-        "| {posts} | {:.1} KB | {:.1} KB | {:.1} KB ({} ops) | {} | {:.1} KB | {} | {:.1} KB | {} | {:.1}x | {:.1} KB | {} nodes, {:.1} KB |\n  regions: {regions}",
+        "| {posts} | {:.1} KB | {:.1} KB | {:.1} KB ({} ops) | {} | {:.1} KB | {} | {:.1} KB | {} | {:.1}x | {:.1} KB | {:.1} KB | {} nodes, {:.1} KB |\n  regions: {regions}",
         json as f64 / 1024.0,
         total as f64 / 1024.0,
         breakdown.root as f64 / 1024.0,
@@ -285,6 +299,7 @@ async fn measure(posts: u64) -> Result<String> {
         breakdown.levels,
         total as f64 / json as f64,
         written as f64 / posts.max(1) as f64 / 1024.0,
+        roots as f64 / posts.max(1) as f64 / 1024.0,
         named.len(),
         (breakdown.root + named_bytes) as f64 / 1024.0,
     ))
@@ -296,12 +311,153 @@ async fn measure(posts: u64) -> Result<String> {
 #[ignore]
 async fn tree_bytes() -> Result<()> {
     let mut rows = vec![
-        "| posts | facts as JSON | tree | root | index nodes | index bytes | leaves | leaf bytes | levels | tree / JSON | written per commit | head names (with root) |".to_string(),
-        "| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |".to_string(),
+        "| posts | facts as JSON | tree | root | index nodes | index bytes | leaves | leaf bytes | levels | tree / JSON | written per commit | mean root | head names (with root) |".to_string(),
+        "| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |".to_string(),
     ];
-    for posts in [0, 10, 200] {
+    for posts in [0, 10, 50, 200, 400] {
         rows.push(measure(posts).await?);
     }
     println!("{}", rows.join("\n"));
+    Ok(())
+}
+
+/// The blocks read that a head did not name.
+type Misses = Arc<Mutex<Vec<[u8; 32]>>>;
+
+/// A reader that holds all blocks and records each read of a block the
+/// head did not name.
+#[derive(Clone)]
+struct NamedReader<Backend> {
+    inner: Backend,
+    named: Arc<HashSet<[u8; 32]>>,
+    misses: Misses,
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+impl<Backend> StorageBackend for NamedReader<Backend>
+where
+    Backend: StorageBackend<Key = [u8; 32], Value = Vec<u8>, Error = DialogStorageError>
+        + ConditionalSync,
+{
+    type Key = [u8; 32];
+    type Value = Vec<u8>;
+    type Error = DialogStorageError;
+
+    fn block_codec(&self) -> BlockCodec {
+        self.inner.block_codec()
+    }
+
+    async fn set(&mut self, key: Self::Key, value: Self::Value) -> Result<(), Self::Error> {
+        self.inner.set(key, value).await
+    }
+
+    async fn get(&self, key: &Self::Key) -> Result<Option<Self::Value>, Self::Error> {
+        if !self.named.contains(key)
+            && let Ok(mut misses) = self.misses.lock()
+        {
+            misses.push(*key);
+        }
+        self.inner.get(key).await
+    }
+}
+
+/// The region of the first and the last entry of the leaf `bytes`.
+fn leaf_edges(bytes: Vec<u8>, codec: &BlockCodec) -> Result<String> {
+    let node = PersistentNode::<Key, State<Datum>>::open(Buffer::from(bytes), codec)?;
+    let Ok(segment) = node.as_segment() else {
+        return Ok("index node".into());
+    };
+    let mut cursor = segment.keys::<Key>()?;
+    let mut first = None;
+    let mut last = "";
+    while let Some((_, key)) = cursor.next_key()? {
+        last = region(key);
+        first.get_or_insert(last);
+    }
+    Ok(format!("{} .. {last}", first.unwrap_or_default()))
+}
+
+/// Prints how many blocks a first screen reads that the head of a sealed
+/// feed tree does not name: the newest posts, the owner's name, and the
+/// author of each fact shown.
+#[dialog_common::test]
+#[ignore]
+async fn named_misses() -> Result<()> {
+    for posts in [10u64, 200] {
+        for _ in 0..8 {
+            let (operator, profile) = test_operator_with_profile().await;
+            let repository = profile
+                .repository(unique_name("misses"))
+                .open()
+                .sealed(SealKey::from([7; 32]))
+                .perform(&operator)
+                .await?;
+            let branch = repository.branch("main").open().perform(&operator).await?;
+            let store =
+                LocalIndex::new(&operator, branch.archive().index(), branch.codec().clone());
+            let storage = ContentAddressedStorage::new(TreeStorageBridge(store.clone()));
+            let owner = "person:did:key:owner".to_string();
+            let name = vec![(owner.clone(), "person/name", Value::String("Kaori".into()))];
+            branch
+                .commit(stream::iter(instructions(name)?))
+                .perform(&operator)
+                .await?;
+            for index in 0..posts {
+                let facts = post(1_767_225_600_000 + index * 3_600_000, index);
+                branch
+                    .commit(stream::iter(instructions(facts)?))
+                    .perform(&operator)
+                    .await?;
+            }
+            let revision = branch.revision().expect("a head");
+            let root = NodeHash::from(*revision.tree.hash());
+            let mut named: HashSet<[u8; 32]> = crate::name_prefetch(&revision, store.clone())
+                .await?
+                .into_iter()
+                .collect();
+            named.insert(*root.as_bytes());
+            let reader = NamedReader {
+                inner: store.clone(),
+                named: Arc::new(named),
+                misses: Misses::default(),
+            };
+            let history = TreeHistory::from_root(revision.tree.hash(), reader.clone());
+            for selector in [
+                ArtifactSelector::new()
+                    .of_starting_with("post:")
+                    .with_limit(240),
+                ArtifactSelector::new().of(owner.parse()?),
+            ] {
+                let views: Vec<_> = ArtifactTree::from_hash(root.clone())
+                    .scan(reader.clone(), spill_cache(), selector)
+                    .try_collect()
+                    .await?;
+                for view in &views {
+                    for version in view.versions() {
+                        history.authorship(version).await?;
+                    }
+                }
+            }
+            let misses = reader
+                .misses
+                .lock()
+                .map(|misses| misses.clone())
+                .unwrap_or_default();
+            let mut leaves = Vec::new();
+            for miss in misses {
+                let bytes = storage
+                    .retrieve(&NodeHash::from(miss))
+                    .await?
+                    .unwrap_or_default();
+                leaves.push(leaf_edges(bytes, storage.codec())?);
+            }
+            println!(
+                "posts {posts}: named {}, read unnamed {}: {leaves:?}",
+                reader.named.len(),
+                leaves.len()
+            );
+        }
+    }
     Ok(())
 }

@@ -433,7 +433,9 @@ impl BufferedBatch {
         let spine = slot
             .as_ref()
             .and_then(|slot| slot.take(tree.root()))
-            .unwrap_or_else(|| HitchhikerTree::open(tree));
+            // A tree born empty has no node to carry its format, so the
+            // spine writes under the format the storage gives a new tree.
+            .unwrap_or_else(|| HitchhikerTree::open(tree).with_manifest(manifest));
         let (buffered, changed) = write_instructions(
             spine,
             store,

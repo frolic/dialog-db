@@ -18,8 +18,9 @@ use dialog_search_tree::ContentAddressedStorage as TreeStorage;
 use futures_util::future::Either;
 
 use crate::{
-    Branch, Checkpoint, EMPTY_TREE_HASH, Index, NetworkedIndex, PublishError, PullError,
-    RemoteSite, RepositoryMemoryExt, Revision, TreeReference, Upstream, UpstreamBranch, prefetch,
+    Branch, Checkpoint, EMPTY_TREE_HASH, HeadBlocks, Index, NetworkedIndex, PublishError,
+    PullError, RemoteSite, RepositoryMemoryExt, Revision, TreeReference, Upstream, UpstreamBranch,
+    prefetch,
 };
 
 /// Below this divergence mass (summed edition excess, roughly commits),
@@ -215,6 +216,7 @@ impl<'a> Pull<'a> {
                     .await?;
                 let upstream = remote
                     .branch(branch_name.clone())
+                    .encoded_with(branch.codec().clone())
                     .open()
                     .perform(env)
                     .await?;
@@ -258,7 +260,13 @@ impl<'a> Pull<'a> {
         // at once, before anything below walks the tree one level at a
         // time.
         if let Some(remote) = &remote {
-            prefetch(env, remote, &branch.archive().index(), &upstream_revision).await;
+            prefetch(
+                env,
+                remote,
+                &branch.archive().index(),
+                &HeadBlocks::from(&upstream_revision),
+            )
+            .await;
         }
 
         // Checkpoint the head cell up front, capturing the version we read the
@@ -750,9 +758,14 @@ impl<'a> Pull<'a> {
                 let screened = futures_util::StreamExt::chain(screened_history, screened_data);
 
                 let mut delta = tree_store.delta();
-                merged = Box::pin(merged.edit().integrate(screened, &tree_store))
-                    .await?
-                    .persist(&mut delta)?;
+                merged = Box::pin(
+                    merged
+                        .edit_with_manifest(&tree_store)
+                        .await?
+                        .integrate(screened, &tree_store),
+                )
+                .await?
+                .persist(&mut delta)?;
                 let merged_tree = TreeReference::from(*merged.root().as_bytes());
 
                 // The replay can degenerate, and the head selection must
@@ -902,9 +915,14 @@ impl<'a> Pull<'a> {
         let screened = futures_util::StreamExt::chain(screened_history, screened_data);
 
         let mut delta = tree_store.delta();
-        merged = Box::pin(merged.edit().integrate(screened, &tree_store))
-            .await?
-            .persist(&mut delta)?;
+        merged = Box::pin(
+            merged
+                .edit_with_manifest(&tree_store)
+                .await?
+                .integrate(screened, &tree_store),
+        )
+        .await?
+        .persist(&mut delta)?;
 
         let merged_tree = TreeReference::from(*merged.root().as_bytes());
 

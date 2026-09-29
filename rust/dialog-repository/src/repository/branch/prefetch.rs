@@ -31,7 +31,7 @@ use dialog_storage::{Blake3Hash, DialogStorageError, StorageBackend};
 use futures_util::future::join_all;
 use std::iter::once;
 
-use crate::{Hydrate, HydrationRequest, RemoteRepository, Revision};
+use crate::{HeadBlocks, Hydrate, HydrationRequest, RemoteRepository, Revision};
 
 /// The most nodes a head names.
 pub const MOST_PREFETCHED: usize = 64;
@@ -152,9 +152,10 @@ impl Named {
     }
 }
 
-/// Copies the root of `revision`'s tree and the blocks its head names
-/// from `remote` into `catalog`, all at once. A block this archive holds
-/// is not fetched again.
+/// Copies the root of a head's tree and the blocks the head names
+/// ([`HeadBlocks`]) from `remote` into `catalog`, all at once. A block this
+/// archive holds is not fetched again. A sealed head names these blocks in
+/// the clear, so a reader fetches them before it holds the key.
 ///
 /// A block is kept under the digest of its own bytes, so a block that
 /// does not match its name is never read in place of it. A failed fetch
@@ -163,13 +164,13 @@ pub async fn prefetch<Env>(
     env: &Env,
     remote: &RemoteRepository,
     catalog: &CatalogScope,
-    revision: &Revision,
+    head: &HeadBlocks,
 ) where
     Env: Provider<Hydrate> + ConditionalSync,
 {
     let route = remote.address();
-    let digests = once(*revision.tree.hash())
-        .chain(revision.prefetch.iter().copied())
+    let digests = once(*head.tree.hash())
+        .chain(head.prefetch.iter().copied())
         .filter(|digest| digest != &dialog_artifacts::EMPTY_TREE_HASH);
     let reads = digests.map(|digest| {
         let request = HydrationRequest {
@@ -229,6 +230,17 @@ mod tests {
     /// named whole.
     #[dialog_common::test]
     async fn it_names_what_shows_the_newest_facts_with_their_authors() -> Result<()> {
+        show_newest(300, 200, 20).await
+    }
+
+    /// A reader that holds only the root and the nodes a head names shows
+    /// every fact under a prefix when a page holds them all.
+    #[dialog_common::test]
+    async fn it_names_what_shows_every_fact_of_a_small_tree() -> Result<()> {
+        show_newest(40, 4_000, 240).await
+    }
+
+    async fn show_newest(notes: usize, body: usize, limit: usize) -> Result<()> {
         let (operator, profile) = test_operator_with_profile().await;
         let repository = profile
             .repository(unique_name("prefetch-newest"))
@@ -245,10 +257,10 @@ mod tests {
             )?]))
             .perform(&operator)
             .await?;
-        for index in 0..300 {
+        for index in 0..notes {
             let note = fact(
                 format!("note:{:04}", 9_999 - index),
-                format!("{index} {}", "n".repeat(200)),
+                format!("{index} {}", "n".repeat(body)),
             )?;
             branch
                 .commit(stream::iter(vec![note]))
@@ -288,8 +300,8 @@ mod tests {
             (
                 ArtifactSelector::new()
                     .of_starting_with("note:")
-                    .with_limit(20),
-                20,
+                    .with_limit(limit),
+                limit.min(notes),
             ),
             (ArtifactSelector::new().of("name:owner".parse()?), 1),
         ] {

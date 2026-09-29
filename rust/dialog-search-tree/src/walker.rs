@@ -488,7 +488,16 @@ where
                         0
                     };
 
-                    if child_index < index.len() {
+                    // Only the children before `visitable` can hold a key in
+                    // the range; a later child holds only keys past its end,
+                    // and so does every node after it. The walk reads none of
+                    // them, even when the last key it yielded ends a leaf.
+                    let visitable = index.children_within(match range.end_bound() {
+                        Bound::Included(bound) => Bound::Included(bound.as_ref()),
+                        Bound::Excluded(bound) => Bound::Excluded(bound.as_ref()),
+                        Bound::Unbounded => Bound::Unbounded,
+                    })?;
+                    if child_index < visitable {
                         // The scan will walk this node's remaining children in
                         // turn, so start reading them now and let them land in
                         // the cache while the walk descends into the first of
@@ -505,11 +514,6 @@ where
                         // decision per site, where a read this scan has queued
                         // but the scheduler has not admitted costs nothing to
                         // abandon.
-                        let visitable = index.children_within(match range.end_bound() {
-                            Bound::Included(bound) => Bound::Included(bound.as_ref()),
-                            Bound::Excluded(bound) => Bound::Excluded(bound.as_ref()),
-                            Bound::Unbounded => Bound::Unbounded,
-                        })?;
                         // A scan with a reach reads ahead only while the
                         // entries of the child it enters and the siblings
                         // before it are fewer than the entries it still
@@ -1567,6 +1571,42 @@ mod prefetch_tests {
             backend.peak_reads_in_flight() > 1,
             "a reach that covers the range reads siblings ahead"
         );
+        Ok(())
+    }
+
+    /// A range that ends on the last key of a leaf reads the path to that
+    /// leaf and no node after it.
+    #[dialog_common::test]
+    async fn it_reads_no_node_past_the_end_of_a_range() -> Result<()> {
+        let mut storage = ContentAddressedStorage::new(ObservingBackend::new());
+        let tree = built_tree(&mut storage).await?;
+        let backend = storage.backend().clone();
+
+        let mut path = vec![tree.root().clone()];
+        let mut node = load(&storage, tree.root()).await?;
+        let first_leaf = loop {
+            match node.body() {
+                ArchivedNodeBody::Index(index) => {
+                    let first = index.hash_at(0)?.clone();
+                    path.push(first.clone());
+                    node = load(&storage, &first).await?;
+                }
+                ArchivedNodeBody::Segment(segment) => break segment.len() as u32,
+            }
+        };
+        assert!(first_leaf < ENTRIES, "the tree has more than one leaf");
+
+        for last in [first_leaf - 1, first_leaf - 2] {
+            let range_tree = Tree::from_hash(tree.root().clone());
+            backend.reset();
+            let rows: Vec<_> = range_tree
+                .stream_range_handles(..=last.to_be_bytes(), &storage)
+                .try_collect()
+                .await?;
+            assert_eq!(rows.len() as u32, last + 1);
+            let reads: HashSet<_> = backend.read_log().into_iter().collect();
+            assert_eq!(reads, path.iter().cloned().collect::<HashSet<_>>());
+        }
         Ok(())
     }
 

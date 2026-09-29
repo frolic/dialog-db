@@ -23,7 +23,8 @@ use super::storage::StorageError;
 /// Attenuation for space operations scoped by name.
 ///
 /// Attaches to Subject (profile DID) and carries the space name.
-/// The operator resolves this name against its base directory.
+/// The operator resolves this name and the profile DID against its base
+/// directory, so each profile has its own spaces.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Space {
     /// Space name, resolved relative to the operator's base directory.

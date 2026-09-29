@@ -25,7 +25,10 @@ impl OpenRemoteBranch {
     where
         Env: Provider<Resolve>,
     {
-        let reference = self.repository.branch(self.branch.name());
+        let reference = self
+            .repository
+            .branch(self.branch.name())
+            .encoded_with(self.branch.codec().clone());
         let cache = reference.cache();
         cache.resolve().perform(env).await?;
 

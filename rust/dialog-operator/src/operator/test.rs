@@ -1665,8 +1665,12 @@ mod tests {
 
     mod space_tests {
         use super::*;
+        use anyhow::Result;
         use dialog_capability::{Subject, did};
+        use dialog_credentials::Ed25519Signer;
+        use dialog_credentials::credential::{Credential, SignerCredential};
         use dialog_effects::space::{self as space_fx, SpaceExt as _};
+        use dialog_varsig::Principal as _;
 
         #[dialog_common::test]
         async fn it_denies_space_load_for_wrong_subject() {
@@ -1693,6 +1697,44 @@ mod tests {
                 .await;
 
             assert!(result.is_err(), "should deny space load for wrong subject");
+        }
+
+        #[dialog_common::test]
+        async fn it_keeps_the_spaces_of_two_profiles_apart_in_one_storage() -> Result<()> {
+            let storage = Storage::volatile();
+            let mut operators = Vec::new();
+            for name in ["space-alice", "space-bob"] {
+                let profile = Profile::open(unique_name(name)).perform(&storage).await?;
+                let operator = profile
+                    .derive(b"test")
+                    .allow(Subject::any())
+                    .network(Network::default())
+                    .build(storage.clone())
+                    .await?;
+                operators.push(operator);
+            }
+
+            let mut created = Vec::new();
+            for operator in &operators {
+                let signer = Ed25519Signer::generate().await?;
+                let credential = Subject::from(operator.profile_did())
+                    .attenuate(space_fx::Space::new("repo"))
+                    .create(Credential::Signer(SignerCredential::from(signer)))
+                    .perform(operator)
+                    .await?;
+                created.push(credential.did());
+            }
+            assert_ne!(created[0], created[1]);
+
+            for (operator, did) in operators.iter().zip(&created) {
+                let loaded = Subject::from(operator.profile_did())
+                    .attenuate(space_fx::Space::new("repo"))
+                    .load()
+                    .perform(operator)
+                    .await?;
+                assert_eq!(&loaded.did(), did);
+            }
+            Ok(())
         }
 
         #[dialog_common::test]

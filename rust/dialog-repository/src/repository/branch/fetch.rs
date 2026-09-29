@@ -71,6 +71,7 @@ impl Fetch<'_> {
                     .await?;
                 let remote_branch = remote_repo
                     .branch(branch_name.clone())
+                    .encoded_with(self.branch.codec().clone())
                     .open()
                     .perform(env)
                     .await?;

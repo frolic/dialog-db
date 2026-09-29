@@ -227,6 +227,7 @@ impl Push<'_> {
 
                 let upstream = remote
                     .branch(upstream_branch_name.clone())
+                    .encoded_with(branch.codec().clone())
                     .open()
                     .perform(env)
                     .await?;

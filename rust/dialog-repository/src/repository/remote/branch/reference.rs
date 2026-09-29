@@ -5,11 +5,12 @@
 //! [`RemoteRepository::branch`].
 
 use crate::{
-    BranchReference, Cell, LoadRemoteBranch, OpenRemoteBranch, RemoteRepository,
+    BranchReference, Cell, HeadCodec, LoadRemoteBranch, OpenRemoteBranch, RemoteRepository,
     RepositoryMemoryExt, Revision,
 };
 use dialog_capability::Subject;
 use dialog_effects::memory::Edition;
+use dialog_storage::BlockCodec;
 
 /// Cached snapshot of the remote branch's last known state: the remote
 /// revision paired with the remote's CAS version, so a fresh
@@ -46,6 +47,15 @@ impl RemoteBranchReference {
         self.branch.name()
     }
 
+    /// The same branch, with its head and tree blocks encoded with `codec`:
+    /// the codec of the local branch that tracks it.
+    pub fn encoded_with(self, codec: BlockCodec) -> Self {
+        Self {
+            branch: self.branch.encoded_with(codec),
+            ..self
+        }
+    }
+
     /// Cell holding the cached remote edition for this branch.
     ///
     /// Rooted at the enclosing repo's subject; path
@@ -63,9 +73,10 @@ impl RemoteBranchReference {
     /// Rooted at the remote repo's subject; path
     /// `memory/branch/{branch_name}/revision`. Used as the in-memory
     /// handle for fork-based resolve/publish — reads and writes through
-    /// this cell cross the network.
-    pub fn revision(&self) -> Cell<Revision> {
-        self.branch.revision()
+    /// this cell cross the network. The head is encoded with the branch's
+    /// codec ([`HeadCodec`]).
+    pub fn revision(&self) -> Cell<Revision, HeadCodec> {
+        self.branch.head()
     }
 
     /// Open the remote branch (resolves local cache, no error if missing).

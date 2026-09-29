@@ -8,6 +8,21 @@ use dialog_effects::space as space_fx;
 use dialog_effects::storage::{self as storage_fx, LocationExt as _};
 use dialog_storage::provider::storage::Storage;
 
+impl<S: Clone> Operator<S> {
+    /// The storage location of this profile's space `name`.
+    ///
+    /// Two profiles can share one storage, for example two profiles in one
+    /// browser origin. The location name includes the profile DID, so the
+    /// space of one profile does not open for another profile with the same
+    /// space name.
+    fn locate(&self, name: &str) -> storage_fx::Location {
+        storage_fx::Location::new(
+            self.directory.clone(),
+            format!("{}.{name}", self.profile_did()),
+        )
+    }
+}
+
 #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl<S> Provider<space_fx::Load> for Operator<S>
@@ -28,8 +43,7 @@ where
             )));
         }
 
-        let name = &space_fx::Space::of(&input).name;
-        let location = storage_fx::Location::new(self.directory.clone(), name);
+        let location = self.locate(&space_fx::Space::of(&input).name);
         Subject::from(did!("local:storage"))
             .attenuate(storage_fx::Storage)
             .attenuate(location)
@@ -59,9 +73,8 @@ where
             )));
         }
 
-        let name = &space_fx::Space::of(&input).name;
         let credential = space_fx::Create::of(&input).credential.clone();
-        let location = storage_fx::Location::new(self.directory.clone(), name);
+        let location = self.locate(&space_fx::Space::of(&input).name);
         Subject::from(did!("local:storage"))
             .attenuate(storage_fx::Storage)
             .attenuate(location)

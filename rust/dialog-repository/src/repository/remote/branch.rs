@@ -3,6 +3,9 @@ use crate::{BranchReference, Cell, RemoteAddress, RemoteRepository, Revision};
 mod fetch;
 pub use fetch::*;
 
+mod head;
+pub use head::*;
+
 mod load;
 pub use load::*;
 
@@ -39,7 +42,7 @@ pub struct RemoteBranch {
     /// Lives under the remote repo's subject at
     /// `memory/branch/{branch}/revision`. Reads and writes through
     /// this cell cross the network via `.fork(address.site())`.
-    upstream: Cell<Revision>,
+    upstream: Cell<Revision, HeadCodec>,
 }
 
 impl RemoteBranch {
@@ -48,7 +51,7 @@ impl RemoteBranch {
         repository: RemoteRepository,
         branch: BranchReference,
         cache: Cell<RemoteEdition>,
-        upstream: Cell<Revision>,
+        upstream: Cell<Revision, HeadCodec>,
     ) -> Self {
         Self {
             repository,
@@ -91,7 +94,7 @@ impl RemoteBranch {
 
     /// The upstream revision cell — an in-memory handle to the remote
     /// branch's own revision cell, used for fork-based resolve/publish.
-    pub fn upstream(&self) -> &Cell<Revision> {
+    pub fn upstream(&self) -> &Cell<Revision, HeadCodec> {
         &self.upstream
     }
 
