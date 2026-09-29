@@ -8,7 +8,7 @@
 //! than a full-index scan.
 //!
 //! In a sealed repository a blob is stored sealed, chunk by chunk (see
-//! [`BlobSealer`](dialog_crypto::BlobSealer)). Its entity names the hash of
+//! [`BlobSealing`](dialog_storage::BlobSealing)). Its entity names the hash of
 //! the sealed bytes, so the host sees only ciphertext, and a reader with the
 //! key fetches and opens it by that entity.
 //!

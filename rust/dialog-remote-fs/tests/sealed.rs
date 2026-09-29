@@ -15,7 +15,8 @@ use dialog_effects::storage::Location;
 use dialog_operator::helpers::{test_operator_with_profile, unique_name};
 use dialog_operator::{Operator, Profile};
 use dialog_remote_fs::FsAddress;
-use dialog_repository::{Blob, Branch, Repository, RepositoryExt as _, SealKey, SiteAddress};
+use dialog_repository::{Blob, Branch, Repository, RepositoryExt as _, SiteAddress};
+use dialog_storage::TestSealing;
 use dialog_storage::provider::FileSystem;
 use dialog_storage::provider::storage::VolatileSpace;
 use dialog_storage::resource::Resource;
@@ -46,7 +47,7 @@ async fn sealed_repo_with_fs_remote(
     operator: &Operator<VolatileSpace>,
     profile: &Profile,
     name: &str,
-    key: SealKey,
+    key: TestSealing,
 ) -> Result<(Repository<SignerCredential>, Location, Branch)> {
     let repository = profile
         .repository(unique_name(name))
@@ -78,7 +79,7 @@ async fn sealed_repo_with_fs_remote(
 /// blocks, so the check has something to look at.
 #[cfg(not(target_arch = "wasm32"))]
 async fn assert_vault_is_sealed(location: &Location, marker: &str) -> Result<()> {
-    use dialog_crypto::SEALED_BLOCK_MAGIC;
+    use dialog_storage::TEST_SEALED_MAGIC;
     use std::path::PathBuf;
 
     let filesystem = FileSystem::open(location).await?;
@@ -100,7 +101,7 @@ async fn assert_vault_is_sealed(location: &Location, marker: &str) -> Result<()>
             "{} holds plaintext",
             path.display()
         );
-        if bytes.starts_with(&SEALED_BLOCK_MAGIC) {
+        if bytes.starts_with(&TEST_SEALED_MAGIC) {
             sealed += 1;
         }
     }
@@ -108,8 +109,8 @@ async fn assert_vault_is_sealed(location: &Location, marker: &str) -> Result<()>
     Ok(())
 }
 
-fn key(byte: u8) -> SealKey {
-    SealKey::from([byte; 32])
+fn key(byte: u8) -> TestSealing {
+    TestSealing::new(byte)
 }
 
 fn note(of: &str, body: &str) -> Result<Instruction> {
@@ -143,7 +144,7 @@ async fn replica(
     profile: &Profile,
     upstream: &Repository<SignerCredential>,
     location: Location,
-    key: Option<SealKey>,
+    key: Option<TestSealing>,
 ) -> Result<Branch> {
     let handle = profile.repository(unique_name("fs-sealed-replica"));
     let repository = match key {

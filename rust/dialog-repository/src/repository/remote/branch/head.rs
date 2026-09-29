@@ -150,7 +150,7 @@ mod tests {
 
     use anyhow::Result;
     use dialog_capability::Did;
-    use dialog_crypto::{KeyRing, SealKey};
+    use dialog_storage::TestSealing;
     use dialog_storage::{BlockCodec, CborEncoder, Encoder};
     use serde::de::IgnoredAny;
 
@@ -167,7 +167,7 @@ mod tests {
     }
 
     fn sealed() -> HeadCodec {
-        HeadCodec::new(BlockCodec::sealed(KeyRing::new(SealKey::from([3; 32]))))
+        HeadCodec::new(BlockCodec::sealed(TestSealing::new(3)))
     }
 
     #[dialog_common::test]
@@ -212,7 +212,7 @@ mod tests {
     #[dialog_common::test]
     async fn it_refuses_a_sealed_head_without_its_key() -> Result<()> {
         let (_, stored) = sealed().encode(&head()?).await?;
-        let other = HeadCodec::new(BlockCodec::sealed(KeyRing::new(SealKey::from([4; 32]))));
+        let other = HeadCodec::new(BlockCodec::sealed(TestSealing::new(4)));
         assert!(other.decode::<Revision>(&stored).await.is_err());
         assert!(
             HeadCodec::default()

@@ -209,7 +209,7 @@ impl Manifest {
     }
 
     /// The format a new tree in storage with `codec` is written under.
-    pub fn for_codec(codec: &dialog_crypto::BlockCodec) -> Self {
+    pub fn for_codec(codec: &dialog_storage::BlockCodec) -> Self {
         if codec.is_sealed() {
             Self::sealed()
         } else {

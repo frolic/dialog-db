@@ -2,10 +2,9 @@ use crate::repository::seal::check_seal;
 use crate::{LoadRepositoryError, Repository};
 use dialog_capability::{Capability, Provider};
 use dialog_common::ConditionalSync;
-use dialog_crypto::{KeyRing, SealKey};
 use dialog_effects::memory;
 use dialog_effects::space::{self, SpaceExt};
-use dialog_storage::BlockCodec;
+use dialog_storage::{BlockCodec, Sealing};
 
 /// Command to load an existing repository.
 ///
@@ -25,9 +24,12 @@ impl LoadRepository {
         Ok(repository)
     }
 
-    /// Load a sealed repository with its `key`.
-    pub fn sealed(self, key: SealKey) -> LoadSealedRepository {
-        LoadSealedRepository { space: self.0, key }
+    /// Load a sealed repository with its `sealing`.
+    pub fn sealed(self, sealing: impl Sealing) -> LoadSealedRepository {
+        LoadSealedRepository {
+            space: self.0,
+            codec: BlockCodec::sealed(sealing),
+        }
     }
 }
 
@@ -36,7 +38,7 @@ impl LoadRepository {
 /// Fails unless the repository was created sealed under the same key.
 pub struct LoadSealedRepository {
     space: Capability<space::Space>,
-    key: SealKey,
+    codec: BlockCodec,
 }
 
 impl LoadSealedRepository {
@@ -45,7 +47,7 @@ impl LoadSealedRepository {
     where
         Env: Provider<space::Load> + Provider<memory::Resolve> + ConditionalSync,
     {
-        let codec = BlockCodec::sealed(KeyRing::new(self.key));
+        let codec = self.codec;
         let repository = Repository::from(self.space.load().perform(env).await?);
         check_seal(&repository.subject(), &codec, env).await?;
         Ok(repository.encoded_with(codec))

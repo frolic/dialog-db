@@ -16,6 +16,9 @@ use crate::IndexedDbStorageBackend;
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 use base58::ToBase58;
 
+mod test_sealing;
+pub use test_sealing::*;
+
 #[cfg(not(target_arch = "wasm32"))]
 mod fs;
 #[cfg(not(target_arch = "wasm32"))]

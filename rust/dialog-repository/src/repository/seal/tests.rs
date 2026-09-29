@@ -8,7 +8,6 @@ use dialog_artifacts::{
 };
 use dialog_common::Blake3Hash as NodeHash;
 use dialog_common::{Blake3Hash, Buffer, ConditionalSend};
-use dialog_crypto::{BlockCodec, KeyRing, SEALED_BLOCK_MAGIC, SealError};
 use dialog_effects::archive::prelude::ArchiveScope;
 use dialog_effects::blob::{BlobError, BlobReader, ByteRange};
 use dialog_identity::{Profile, SpaceHandle};
@@ -18,19 +17,20 @@ use dialog_search_tree::{
     ContentAddressedStorage, Manifest, PersistentNode, SEALED_OP_BUFFER, Traversable as _, Visit,
 };
 use dialog_storage::provider::storage::VolatileSpace;
+use dialog_storage::{BlockCodec, SealingError, TEST_SEALED_MAGIC, TestSealing};
 use futures_util::{Stream, StreamExt as _, stream};
 
 use crate::{
     Blob, Branch, CommitError, Index, LoadRepositoryError, NetworkedIndex, OpenRepositoryError,
-    Repository, RepositoryExt as _, RepositorySealError, SealKey,
+    Repository, RepositoryExt as _, RepositorySealError,
 };
 
-fn key(byte: u8) -> SealKey {
-    SealKey::from([byte; 32])
+fn key(byte: u8) -> TestSealing {
+    TestSealing::new(byte)
 }
 
 fn sealed_codec(byte: u8) -> BlockCodec {
-    BlockCodec::sealed(KeyRing::new(key(byte)))
+    BlockCodec::sealed(key(byte))
 }
 
 fn space(profile: &Profile, name: &str) -> SpaceHandle {
@@ -160,7 +160,7 @@ async fn it_stores_only_sealed_tree_blocks() -> Result<()> {
     let blocks = stored_tree_blocks(&operator, &sealed, &branch).await?;
     assert!(blocks.len() > 1, "the tree spans several blocks");
     for block in &blocks {
-        assert!(block.starts_with(&SEALED_BLOCK_MAGIC));
+        assert!(block.starts_with(&TEST_SEALED_MAGIC));
         assert!(!contains(block, &marker));
     }
 
@@ -486,7 +486,7 @@ async fn it_stores_a_sealed_blob_as_ciphertext() -> Result<()> {
         .await?;
     let (_, entity) = write_blob(&operator, &sealed, &payload).await?;
     let stored = stored_blob(&operator, &sealed, &entity).await?;
-    assert!(stored.starts_with(&SEALED_BLOCK_MAGIC));
+    assert!(stored.starts_with(&TEST_SEALED_MAGIC));
     assert!(!contains(&stored, &marker));
     assert_eq!(
         Some(*Buffer::from(stored).blake3_hash().as_bytes()),
@@ -522,14 +522,18 @@ async fn it_reads_a_sealed_blob_only_with_its_key() -> Result<()> {
     let stored = stored_blob(&operator, &repository, &entity).await?;
     assert_ne!(stored, payload);
 
-    let open_with = |codec: BlockCodec| -> Result<Vec<u8>, SealError> {
+    let open_with = |codec: BlockCodec| -> Result<Vec<u8>, SealingError> {
         let mut opener = codec.blob_opener(0, None).expect("a sealed codec");
-        let mut plaintext = opener.open(&stored)?;
+        let start = opener.sealed_offset() as usize;
+        let mut plaintext = opener.open(&stored[start..])?;
         plaintext.extend(opener.finish()?);
         Ok(plaintext)
     };
     assert_eq!(open_with(sealed_codec(1))?, payload);
-    assert_eq!(open_with(sealed_codec(2)), Err(SealError::Authentication));
+    assert_eq!(
+        open_with(sealed_codec(2)),
+        Err(SealingError::Authentication)
+    );
 
     // A repository sealed under another key that holds the same stored
     // bytes cannot read the blob through them.

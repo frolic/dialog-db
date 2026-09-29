@@ -1,7 +1,6 @@
 use async_trait::async_trait;
 use dialog_capability::Provider;
 use dialog_common::{Buffer, ConditionalSync};
-use dialog_crypto::sealed_generation;
 use dialog_effects::archive::prelude::CatalogScope;
 use dialog_effects::archive::{Get, Put};
 use dialog_storage::{
@@ -80,7 +79,7 @@ where
     type Error = DialogStorageError;
 
     async fn set(&mut self, _key: Self::Key, value: Self::Value) -> Result<(), Self::Error> {
-        if self.codec.is_sealed() && sealed_generation(&value).is_err() {
+        if !self.codec.accepts(&value) {
             return Err(DialogStorageError::Storage(
                 "a sealed index refuses a block that is not sealed".into(),
             ));

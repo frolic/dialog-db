@@ -4,10 +4,9 @@ use dialog_capability::{Capability, Provider};
 use dialog_common::ConditionalSync;
 use dialog_credentials::Ed25519Signer;
 use dialog_credentials::credential::{Credential, SignerCredential};
-use dialog_crypto::{KeyRing, SealKey};
 use dialog_effects::memory;
 use dialog_effects::space::{self, SpaceExt};
-use dialog_storage::BlockCodec;
+use dialog_storage::{BlockCodec, Sealing};
 
 /// Command to create a new repository.
 ///
@@ -67,12 +66,12 @@ impl CreateRepository {
         }
     }
     /// Create a sealed repository: every tree block it stores is sealed
-    /// under `key`, and it opens only with the same key.
-    pub fn sealed(self, key: SealKey) -> CreateSealedRepository {
+    /// by `sealing`, and it opens only with the same key.
+    pub fn sealed(self, sealing: impl Sealing) -> CreateSealedRepository {
         CreateSealedRepository {
             space: self.0,
             credential: None,
-            key,
+            codec: BlockCodec::sealed(sealing),
         }
     }
 }
@@ -101,12 +100,12 @@ impl CreateRepositoryWith {
             .await?;
         Ok(Repository::from(self.credential))
     }
-    /// Create the repository sealed under `key`.
-    pub fn sealed(self, key: SealKey) -> CreateSealedRepository {
+    /// Create the repository sealed by `sealing`.
+    pub fn sealed(self, sealing: impl Sealing) -> CreateSealedRepository {
         CreateSealedRepository {
             space: self.space,
             credential: Some(self.credential),
-            key,
+            codec: BlockCodec::sealed(sealing),
         }
     }
 }
@@ -118,7 +117,7 @@ impl CreateRepositoryWith {
 pub struct CreateSealedRepository {
     space: Capability<space::Space>,
     credential: Option<SignerCredential>,
-    key: SealKey,
+    codec: BlockCodec,
 }
 
 impl CreateSealedRepository {
@@ -149,7 +148,7 @@ impl CreateSealedRepository {
         }
         .perform(env)
         .await?;
-        let codec = BlockCodec::sealed(KeyRing::new(self.key));
+        let codec = self.codec;
         record_seal(&repository.subject(), &codec, env).await?;
         Ok(repository.encoded_with(codec))
     }

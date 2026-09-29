@@ -97,7 +97,7 @@ where
         self.backend.get(key).await
     }
 
-    fn block_codec(&self) -> dialog_crypto::BlockCodec {
+    fn block_codec(&self) -> crate::BlockCodec {
         self.backend.block_codec()
     }
 }

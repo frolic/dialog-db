@@ -4,8 +4,8 @@ use async_trait::async_trait;
 use dialog_common::{ConditionalSend, ConditionalSync};
 use tokio::sync::Mutex;
 
+use crate::BlockCodec;
 use crate::DialogStorageError;
-use dialog_crypto::BlockCodec;
 
 mod memory;
 pub use memory::*;

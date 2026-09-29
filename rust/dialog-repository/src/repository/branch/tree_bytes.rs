@@ -24,9 +24,9 @@ use dialog_artifacts::inspect::key_components;
 use dialog_artifacts::tree::{ArtifactTree, ArtifactTreeExt as _, TreeStorageBridge, spill_cache};
 use dialog_artifacts::{Artifact, ArtifactSelector, Datum, Instruction, Key, State, Value};
 use dialog_common::{Blake3Hash as NodeHash, Buffer, ConditionalSync};
-use dialog_crypto::{BlockCodec, SealKey};
 use dialog_operator::helpers::{test_operator_with_profile, unique_name};
 use dialog_search_tree::{ArchivedNodeBody, ContentAddressedStorage, PersistentNode};
+use dialog_storage::{BlockCodec, TestSealing};
 use dialog_storage::{DialogStorageError, StorageBackend};
 use futures_util::{TryStreamExt as _, stream};
 use rkyv::rancor::Error as RkyvError;
@@ -220,7 +220,7 @@ async fn measure(posts: u64) -> Result<String> {
     let repository = profile
         .repository(unique_name("tree-bytes"))
         .open()
-        .sealed(SealKey::from([7; 32]))
+        .sealed(TestSealing::new(7))
         .perform(&operator)
         .await?;
     let branch = repository.branch("main").open().perform(&operator).await?;
@@ -390,7 +390,7 @@ async fn named_misses() -> Result<()> {
             let repository = profile
                 .repository(unique_name("misses"))
                 .open()
-                .sealed(SealKey::from([7; 32]))
+                .sealed(TestSealing::new(7))
                 .perform(&operator)
                 .await?;
             let branch = repository.branch("main").open().perform(&operator).await?;

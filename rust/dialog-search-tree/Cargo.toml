@@ -14,7 +14,6 @@ web-integration-tests = []
 [dependencies]
 tracing = { workspace = true }
 dialog-common = { workspace = true }
-dialog-crypto = { workspace = true }
 dialog-macros = { workspace = true }
 dialog-storage = { workspace = true }
 anyhow = { workspace = true }

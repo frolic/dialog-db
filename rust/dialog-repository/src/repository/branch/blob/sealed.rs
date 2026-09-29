@@ -1,17 +1,17 @@
 //! Opening the stored bytes of a sealed blob as they stream in.
 
-use dialog_crypto::{BlobOpener, SealError};
 use dialog_effects::blob::{BlobError, BlobReader, BlobSource};
+use dialog_storage::{BlobOpening, SealingError};
 
 /// A reader over the plaintext of a sealed blob's stored bytes.
 struct OpenedBlob {
     stored: BlobReader,
-    opener: Option<BlobOpener>,
+    opener: Option<Box<dyn BlobOpening>>,
 }
 
 /// Wraps `stored`, the stored bytes of the range `opener` names, in a reader
 /// that yields the plaintext of that range.
-pub(super) fn open_blob(stored: BlobReader, opener: BlobOpener) -> BlobReader {
+pub(super) fn open_blob(stored: BlobReader, opener: Box<dyn BlobOpening>) -> BlobReader {
     Box::new(OpenedBlob {
         stored,
         opener: Some(opener),
@@ -20,7 +20,7 @@ pub(super) fn open_blob(stored: BlobReader, opener: BlobOpener) -> BlobReader {
 
 /// A blob that does not seal or open is reported as a storage failure:
 /// the bytes the store holds are not the ones this key sealed.
-pub(super) fn sealing_error(error: SealError) -> BlobError {
+pub(super) fn sealing_error(error: SealingError) -> BlobError {
     BlobError::Storage(format!("sealed blob: {error}"))
 }
 

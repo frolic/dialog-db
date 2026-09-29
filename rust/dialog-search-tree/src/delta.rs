@@ -1,7 +1,7 @@
 use parking_lot::RwLock;
 use std::sync::Arc;
 
-use dialog_crypto::BlockCodec;
+use dialog_storage::BlockCodec;
 use hashbrown::HashMap;
 
 /// A thread-safe accumulator of pending changes to tree nodes.

@@ -140,7 +140,7 @@ pub use accessor::*;
 
 pub use dialog_common::Buffer;
 
-pub use dialog_crypto::BlockCodec;
+pub use dialog_storage::BlockCodec;
 
 mod kv;
 pub use kv::*;

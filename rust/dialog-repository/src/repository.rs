@@ -59,10 +59,9 @@ pub(crate) mod source;
 // `dialog_repository::{Revision, TreeReference}` paths.
 pub use dialog_artifacts::{EMPTY_TREE_HASH, Revision, TreeReference};
 
-// The key a sealed repository is created and opened with, and the codec a
+// The hook a sealed repository is created and opened with, and the codec a
 // repository's tree blocks are encoded with.
-pub use dialog_crypto::SealKey;
-pub use dialog_storage::BlockCodec;
+pub use dialog_storage::{BlobOpening, BlobSealing, BlockCodec, Sealing, SealingError};
 
 /// A repository scoped to a specific subject.
 ///

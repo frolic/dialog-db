@@ -46,9 +46,7 @@ where
         return Ok(());
     };
     seal_cell(subject)
-        .publish(SealRecord {
-            key: key.as_bytes().to_vec(),
-        })
+        .publish(SealRecord { key })
         .perform(env)
         .await?;
     Ok(())
@@ -70,7 +68,7 @@ where
         (None, None) => Ok(()),
         (Some(_), None) => Err(RepositorySealError::KeyRequired),
         (None, Some(_)) => Err(RepositorySealError::NotSealed),
-        (Some(record), Some(key)) if record.key == key.as_bytes() => Ok(()),
+        (Some(record), Some(key)) if record.key == key => Ok(()),
         (Some(_), Some(_)) => Err(RepositorySealError::WrongKey),
     }
 }

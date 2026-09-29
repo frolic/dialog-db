@@ -1,6 +1,6 @@
 use dialog_common::{Blake3Hash, ConditionalSend};
 
-use dialog_crypto::BlockCodec;
+use dialog_storage::BlockCodec;
 use dialog_storage::{DialogStorageError, StorageBackend};
 
 /// Content-addressed storage wrapper for tree nodes.

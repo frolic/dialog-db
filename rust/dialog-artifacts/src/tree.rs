@@ -2402,11 +2402,11 @@ mod sealed_tests {
 
     use super::{ArtifactTree, ArtifactTreeExt};
     use crate::{Artifact, DialogArtifactsError, Instruction, Value};
-    use dialog_crypto::{KeyRing, SEALED_BLOCK_MAGIC, SealKey};
     use dialog_search_tree::{BlockCodec, Delta};
     use dialog_storage::{
         Blake3Hash, DialogStorageError, MemoryStorageBackend, StorageBackend, StorageSource as _,
     };
+    use dialog_storage::{TEST_SEALED_MAGIC, TestSealing};
     use futures_util::{TryStreamExt as _, stream};
 
     const MARKER: &str = "plaintext-marker-that-must-stay-inside-the-seal";
@@ -2422,7 +2422,7 @@ mod sealed_tests {
         fn new() -> Self {
             Self {
                 blocks: MemoryStorageBackend::default(),
-                codec: BlockCodec::sealed(KeyRing::new(SealKey::from([1; 32]))),
+                codec: BlockCodec::sealed(TestSealing::new(1)),
             }
         }
     }
@@ -2489,7 +2489,7 @@ mod sealed_tests {
         let blocks: Vec<(Blake3Hash, Vec<u8>)> = store.blocks.read().try_collect().await?;
         assert!(blocks.len() > 1);
         for (_, bytes) in &blocks {
-            assert!(bytes.starts_with(&SEALED_BLOCK_MAGIC));
+            assert!(bytes.starts_with(&TEST_SEALED_MAGIC));
             assert!(!bytes.windows(MARKER.len()).any(|w| w == MARKER.as_bytes()));
         }
 

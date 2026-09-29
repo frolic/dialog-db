@@ -4,10 +4,9 @@ use dialog_capability::{Capability, Provider};
 use dialog_common::ConditionalSync;
 use dialog_credentials::Ed25519Signer;
 use dialog_credentials::credential::{Credential, SignerCredential};
-use dialog_crypto::{KeyRing, SealKey};
 use dialog_effects::memory;
 use dialog_effects::space::{self, SpaceExt};
-use dialog_storage::BlockCodec;
+use dialog_storage::{BlockCodec, Sealing};
 
 /// Command to open (load-or-create) a repository.
 ///
@@ -34,10 +33,13 @@ impl OpenRepository {
         Ok(repository)
     }
 
-    /// Open a sealed repository with its `key`, creating it sealed under
-    /// that key when it does not exist.
-    pub fn sealed(self, key: SealKey) -> OpenSealedRepository {
-        OpenSealedRepository { space: self.0, key }
+    /// Open a sealed repository with its `sealing`, creating it sealed
+    /// by it when it does not exist.
+    pub fn sealed(self, sealing: impl Sealing) -> OpenSealedRepository {
+        OpenSealedRepository {
+            space: self.0,
+            codec: BlockCodec::sealed(sealing),
+        }
     }
 }
 
@@ -47,7 +49,7 @@ impl OpenRepository {
 /// same key.
 pub struct OpenSealedRepository {
     space: Capability<space::Space>,
-    key: SealKey,
+    codec: BlockCodec,
 }
 
 impl OpenSealedRepository {
@@ -60,7 +62,7 @@ impl OpenSealedRepository {
             + Provider<memory::Publish>
             + ConditionalSync,
     {
-        let codec = BlockCodec::sealed(KeyRing::new(self.key));
+        let codec = self.codec;
         let repository = match self.space.clone().load().perform(env).await {
             Ok(credential) => {
                 let repository = Repository::from(credential);

@@ -515,7 +515,7 @@ mod tests {
         let repo = profile
             .repository(unique_name("repo"))
             .open()
-            .sealed(crate::SealKey::from([4; 32]))
+            .sealed(dialog_storage::TestSealing::new(4))
             .perform(&operator)
             .await?;
         let branch = repo.branch("main").open().perform(&operator).await?;

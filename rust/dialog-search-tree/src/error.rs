@@ -1,5 +1,5 @@
-use dialog_crypto::SealError;
 use dialog_storage::DialogStorageError;
+use dialog_storage::SealingError;
 use thiserror::Error;
 
 /// Errors that can occur when working with search trees.
@@ -28,7 +28,7 @@ pub enum DialogSearchTreeError {
     /// A block could not be sealed or opened: it was sealed under another
     /// key, its bytes were changed, or a sealed tree met a plain block.
     #[error("Failed to seal or open a block: {0}")]
-    Seal(#[from] SealError),
+    Seal(#[from] SealingError),
 
     /// A write would encode blocks with a codec other than its store's.
     #[error("A delta's block codec differs from its store's")]

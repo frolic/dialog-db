@@ -8,11 +8,11 @@ wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_dedicated_worker);
 
 use anyhow::Result;
 use dialog_common::Blake3Hash;
-use dialog_crypto::{KeyRing, SEALED_BLOCK_MAGIC, SealError, SealKey};
 use dialog_search_tree::{
     BlockCodec, ContentAddressedStorage, DialogSearchTreeError, PersistentTree, TreeDifference,
 };
 use dialog_storage::{DialogStorageError, MemoryStorageBackend, StorageBackend, StorageSource};
+use dialog_storage::{SealingError, TEST_SEALED_MAGIC, TestSealing};
 use futures_util::{StreamExt, TryStreamExt};
 
 type Backend = MemoryStorageBackend<Blake3Hash, Vec<u8>>;
@@ -22,7 +22,7 @@ type Tree = PersistentTree<[u8; 4], Vec<u8>>;
 const MARKER: &[u8] = b"plaintext-marker-that-must-stay-inside-the-seal";
 
 fn sealed(byte: u8) -> BlockCodec {
-    BlockCodec::sealed(KeyRing::new(SealKey::from([byte; 32])))
+    BlockCodec::sealed(TestSealing::new(byte))
 }
 
 fn store(codec: BlockCodec) -> Store {
@@ -92,7 +92,7 @@ async fn it_stores_no_plaintext() -> Result<()> {
     let blocks = stored_blocks(&sealed_store).await?;
     assert!(blocks.len() > 3, "the tree spans several nodes");
     for (hash, bytes) in &blocks {
-        assert!(bytes.starts_with(&SEALED_BLOCK_MAGIC));
+        assert!(bytes.starts_with(&TEST_SEALED_MAGIC));
         assert!(!contains(bytes, MARKER));
         assert_eq!(&Blake3Hash::hash(bytes), hash, "address is the sealed hash");
     }
@@ -140,7 +140,7 @@ async fn it_refuses_to_read_with_the_wrong_key() -> Result<()> {
     let result = reopened.get(&7u32.to_be_bytes(), &other_key).await;
     assert!(matches!(
         result,
-        Err(DialogSearchTreeError::Seal(SealError::Authentication))
+        Err(DialogSearchTreeError::Seal(SealingError::Authentication))
     ));
 
     let no_key = Store::new(store.backend().clone());
@@ -171,7 +171,7 @@ async fn it_syncs_and_merges_sealed_replicas() -> Result<()> {
         futures_util::pin_mut!(nodes);
         while let Some(node) = nodes.next().await {
             let node = node?;
-            assert!(node.buffer().as_ref().starts_with(&SEALED_BLOCK_MAGIC));
+            assert!(node.buffer().as_ref().starts_with(&TEST_SEALED_MAGIC));
             theirs
                 .store(node.buffer().as_ref().to_vec(), node.hash())
                 .await?;
@@ -276,7 +276,7 @@ async fn it_takes_the_codec_from_the_backend() -> Result<()> {
     assert!(
         blocks
             .iter()
-            .all(|(_, bytes)| bytes.starts_with(&SEALED_BLOCK_MAGIC))
+            .all(|(_, bytes)| bytes.starts_with(&TEST_SEALED_MAGIC))
     );
     let reader = ContentAddressedStorage::new(space);
     assert_eq!(

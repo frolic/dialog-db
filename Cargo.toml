@@ -20,7 +20,6 @@ members = [
     "rust/dialog-baseline",
     "rust/dialog-capability",
     "rust/dialog-credentials",
-    "rust/dialog-crypto",
     "rust/dialog-did-web",
     "rust/dialog-common",
     "rust/dialog-effects",
@@ -211,9 +210,6 @@ path = "./rust/dialog-did-web"
 
 [workspace.dependencies.dialog-encoding]
 path = "./rust/dialog-encoding"
-
-[workspace.dependencies.dialog-crypto]
-path = "./rust/dialog-crypto"
 
 [workspace.dependencies.dialog-csv]
 path = "./rust/dialog-csv"

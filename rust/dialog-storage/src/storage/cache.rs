@@ -55,7 +55,7 @@ where
     type Value = Backend::Value;
     type Error = Backend::Error;
 
-    fn block_codec(&self) -> dialog_crypto::BlockCodec {
+    fn block_codec(&self) -> crate::BlockCodec {
         self.backend.block_codec()
     }
 
