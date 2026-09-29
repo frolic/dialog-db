@@ -16,9 +16,6 @@ use dialog_effects::archive::prelude::{ArchiveScope, CatalogScope};
 use crate::repository::source::SourceRef;
 use crate::{Branch, EMPTY_TREE_HASH, Index, NetworkedIndex, RemoteSite};
 
-mod authored;
-pub use authored::*;
-
 /// Command struct for selecting artifacts from a branch or a snapshot.
 pub struct Select<'a> {
     source: SourceRef<'a>,

@@ -135,10 +135,7 @@ impl OperatorBuilder {
         let profile_signer = ed25519_signer(&self.credential)?;
         let operator_signer = derive_operator(&profile_signer, &self.context).await?;
         let credentials =
-            Authority::new("operator", profile_signer.clone(), operator_signer.clone())
-                .endorsed()
-                .await
-                .map_err(|e| OperatorError::Key(format!("{e}")))?;
+            Authority::new("operator", profile_signer.clone(), operator_signer.clone());
 
         // Mint the session: one in-memory grant per allowed scope.
         let mut session = Vec::with_capacity(self.allowed.len());

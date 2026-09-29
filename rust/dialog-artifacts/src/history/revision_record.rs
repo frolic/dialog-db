@@ -7,9 +7,7 @@ use crate::{
 };
 use dialog_search_tree::Manifest;
 
-use super::{
-    Edition, Origin, REVISION_ATTRIBUTE, Version, verify_endorsement, verify_issuer_signature,
-};
+use super::{Edition, Origin, REVISION_ATTRIBUTE, Version, verify_issuer_signature};
 
 /// Everything a revision states about itself, as one atomic record.
 ///
@@ -64,18 +62,6 @@ pub struct RevisionRecord {
     /// [`carry_skips`](super::carry_skips)). Empty for genesis and merge
     /// revisions.
     pub skips: Vec<Version>,
-    /// The [`ClaimsDigest`](super::ClaimsDigest) of the history records
-    /// this revision wrote. With it, a reader checks that the records under
-    /// this revision's version are the issuer's own. Empty on records made
-    /// before the digest existed.
-    #[serde(default, skip_serializing_if = "Vec::is_empty", with = "serde_bytes")]
-    pub claims: Vec<u8>,
-    /// The authority's signature over the
-    /// [`endorsement_payload`](super::endorsement_payload) of the issuer,
-    /// which binds the issuer to the authority it claims. Empty when the
-    /// authority signed none.
-    #[serde(default, skip_serializing_if = "Vec::is_empty", with = "serde_bytes")]
-    pub endorsement: Vec<u8>,
     /// The issuer's Ed25519 signature over [`RevisionRecord::payload`] —
     /// this record encoded with an empty signature field. The key is the
     /// one the issuer DID names (`did:key`).
@@ -157,18 +143,6 @@ impl RevisionRecord {
         }
         verify_issuer_signature(&self.issuer, &self.payload()?, &self.signature)?;
         Ok(())
-    }
-
-    /// The authority that wrote this revision, when its endorsement of the
-    /// issuer verifies. The record's own signature binds the endorsement
-    /// to the rest of the record, so verify the record first
-    /// ([`RevisionRecord::verify`]).
-    pub fn author(&self) -> Option<&str> {
-        if self.endorsement.is_empty() {
-            return None;
-        }
-        verify_endorsement(&self.authority, &self.issuer, &self.endorsement).ok()?;
-        Some(&self.authority)
     }
 
     /// The fact carrying this record: an [`Artifact`] on the revision

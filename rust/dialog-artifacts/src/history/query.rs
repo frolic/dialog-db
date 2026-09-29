@@ -1,37 +1,30 @@
-use std::collections::BTreeSet;
 use std::ops::Bound;
 use std::str::FromStr;
 
 use dialog_common::{Blake3Hash as NodeHash, ConditionalSync};
-use dialog_search_tree::{Buffer, ContentAddressedStorage as NodeStorage, PersistentNode};
+use dialog_search_tree::ContentAddressedStorage as NodeStorage;
 use dialog_storage::{Blake3Hash, DialogStorageError, StorageBackend};
 use futures_util::{Stream, StreamExt, TryStreamExt};
-use rkyv::deserialize;
-use rkyv::rancor::Error as RkyvError;
 
 use crate::Value;
 use crate::history::VersionExt as _;
-use crate::inspect::key_components;
 use crate::tree::ArtifactTreeExt as _;
 use crate::tree::{
     ArtifactTree, SPILL_LOOKAHEAD, SpillCache, TreeStorageBridge, fetch_spilled_cached, spill_cache,
 };
 use crate::{
-    Attribute, AttributeKey, AttributeKeyPart, Datum, DialogArtifactsError, ENTITY_KEY_TAG, Entity,
-    EntityKeyPart, Key, KeyViewConstruct, KeyViewMut, State, history_claim_range,
+    Attribute, DialogArtifactsError, ENTITY_KEY_TAG, Entity, Key, State, history_claim_range,
     history_key_version, history_region_range, history_version_range,
 };
 
 use super::{
-    Authorship, Claim, ClaimsDigest, Context, Edition, History, Origin, REVISION_ATTRIBUTE, Record,
-    RevisionRecord, Version,
+    Claim, Context, Edition, History, Origin, REVISION_ATTRIBUTE, Record, RevisionRecord, Version,
 };
 
 /// The key ranges that a reader of one revision reads first, each as
-/// inclusive bounds: the revision's history records, its revision record,
-/// and the entity-ordered entry of each fact the revision wrote.
+/// inclusive bounds: the entity-ordered entry of each fact the revision
+/// wrote.
 ///
-/// These are the reads that show the revision's facts with their author.
 /// Attribute-ordered and value-ordered reads of the facts are not in it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RevisionReads {
@@ -240,38 +233,6 @@ where
         + Clone
         + ConditionalSync,
 {
-    /// Who wrote the revision `version`, when a reader can prove it (see
-    /// [`Authorship`]). None when the revision has no record that verifies,
-    /// no endorsement of its issuer, or no claims digest, or when the
-    /// history records under its version do not hash to that digest.
-    pub async fn authorship(
-        &self,
-        version: &Version,
-    ) -> Result<Option<Authorship>, DialogArtifactsError> {
-        let record = match self.revision_record(version).await {
-            Ok(Some(record)) => record,
-            Ok(None) | Err(DialogArtifactsError::InvalidSignature(_)) => return Ok(None),
-            Err(error) => return Err(error),
-        };
-        let Some(author) = record.author() else {
-            return Ok(None);
-        };
-        if record.claims.is_empty() {
-            return Ok(None);
-        }
-        let (digest, asserted) = self.claims_of(version).await?;
-        if digest.as_slice() != record.claims.as_slice() {
-            return Ok(None);
-        }
-        let manifest = self.tree.manifest(&self.storage).await?;
-        Ok(Some(Authorship::new(
-            author.to_string(),
-            *version,
-            manifest,
-            asserted,
-        )))
-    }
-
     /// The reads of the newest revisions in `context`, newest first: for
     /// each origin, the revisions in the last `editions` editions up to its
     /// watermark. A writer that names the tree nodes of these reads in its
@@ -300,47 +261,6 @@ where
         Ok(reads)
     }
 
-    /// The versions of the facts in the entity-ordered leaf `node`, in
-    /// entry order, each once: the revisions whose authors a reader of the
-    /// leaf proves. Revision records are left out, because a reader reads
-    /// them only to prove an author. Any other node has none.
-    pub async fn fact_versions(
-        &self,
-        node: &NodeHash,
-    ) -> Result<Vec<Version>, DialogArtifactsError> {
-        let mut versions = Vec::new();
-        let Some(bytes) = self.storage.retrieve(node).await? else {
-            return Ok(versions);
-        };
-        let node =
-            PersistentNode::<Key, State<Datum>>::open(Buffer::from(bytes), self.storage.codec())?;
-        let Ok(segment) = node.as_segment() else {
-            return Ok(versions);
-        };
-        let mut keys = segment.keys::<Key>()?;
-        while let Some((at, key)) = keys.next_key()? {
-            if key.first() != Some(&ENTITY_KEY_TAG) {
-                continue;
-            }
-            let revision_record = key_components(key)
-                .iter()
-                .any(|part| part.kind == "attribute" && part.text == REVISION_ATTRIBUTE);
-            if revision_record {
-                continue;
-            }
-            let state: State<Datum> = deserialize::<State<Datum>, RkyvError>(segment.value_at(at)?)
-                .map_err(|error| DialogArtifactsError::Tree(format!("entry decode: {error}")))?;
-            if let State::Added(datum) = state {
-                for version in datum.versions() {
-                    if !versions.contains(version) {
-                        versions.push(*version);
-                    }
-                }
-            }
-        }
-        Ok(versions)
-    }
-
     /// The reads of the revisions of `origin` from edition `floor` to
     /// edition `top`, both included, in edition order.
     async fn reads_between(
@@ -364,7 +284,10 @@ where
             let version = history_key_version(&entry.key)?;
             if current.as_ref().map(|reads| reads.version) != Some(version) {
                 reads.extend(current.take());
-                current = Some(self.author_reads(version)?);
+                current = Some(RevisionReads {
+                    version,
+                    ranges: Vec::new(),
+                });
             }
             // A history key is the tag and the version, then the same bytes
             // as the fact's entity-ordered key after its tag.
@@ -378,55 +301,6 @@ where
         }
         reads.extend(current);
         Ok(reads)
-    }
-
-    /// The reads that prove who wrote the facts of `version`: its history
-    /// records and its revision record. The facts themselves are not in it.
-    pub fn author_reads(&self, version: Version) -> Result<RevisionReads, DialogArtifactsError> {
-        let (min, max) = history_version_range(&version);
-        let of = version.entity();
-        let the = Attribute::from_str(REVISION_ATTRIBUTE)?;
-        let record_start = <AttributeKey<Key> as KeyViewConstruct>::min()
-            .set_attribute(AttributeKeyPart::from(&the))
-            .set_entity(EntityKeyPart::from(&of))
-            .into_key();
-        let record_end = <AttributeKey<Key> as KeyViewConstruct>::max()
-            .set_attribute(AttributeKeyPart::from(&the))
-            .set_entity(EntityKeyPart::from(&of))
-            .into_key();
-        Ok(RevisionReads {
-            version,
-            ranges: vec![(min, max), (record_start, record_end)],
-        })
-    }
-
-    /// The [`ClaimsDigest`] of the history records under `version`, as a
-    /// revision record signs it.
-    pub async fn claims_digest(&self, version: &Version) -> Result<[u8; 32], DialogArtifactsError> {
-        Ok(self.claims_of(version).await?.0)
-    }
-
-    /// The claims digest under `version`, and the keys of its assertions.
-    async fn claims_of(
-        &self,
-        version: &Version,
-    ) -> Result<([u8; 32], BTreeSet<Key>), DialogArtifactsError> {
-        let (min, max) = history_version_range(version);
-        let stream = self
-            .tree
-            .stream_range((Bound::Included(min), Bound::Excluded(max)), &self.storage);
-        tokio::pin!(stream);
-        let mut digest = ClaimsDigest::new();
-        let mut asserted = BTreeSet::new();
-        while let Some(entry) = stream.try_next().await? {
-            if let State::Added(datum) = &entry.value {
-                digest.add(&entry.key, datum);
-                if !datum.retraction {
-                    asserted.insert(entry.key);
-                }
-            }
-        }
-        Ok((digest.finish(), asserted))
     }
 }
 

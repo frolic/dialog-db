@@ -544,20 +544,11 @@ where
             None => Revision::new(TreeReference::default(), line_entity.clone(), issuer),
         };
         debug_assert_eq!(revision.version(), version);
-        // The caller's machinery entries (blob-index edits) ride the same
-        // batch as the revision record, so one seal covers data, record,
-        // and entries together.
-        let batch = batch.record(&store, self.entries).await?;
         // Sign the record before it enters the tree: the issuer's signature
         // covers everything the revision states about itself, and readers
         // (`TreeHistory::revision_record`) refuse records that don't verify
-        // against the slot they were found at. The record signs the digest
-        // of the history records this commit wrote, and carries the
-        // profile's endorsement of the issuer, so a reader can prove who
-        // wrote each fact (`TreeHistory::authorship`).
+        // against the slot they were found at.
         let mut record = revision.record(&profile, parent.into_iter().collect(), skips);
-        record.claims = batch.claims(&store, &version).await?.to_vec();
-        record.endorsement = authority.endorsement().to_vec();
         record.signature = Attest::new(record.payload()?).perform(env).await?;
         debug_assert_eq!(record.version(), version);
         // The record's key carries its value through the tree's own
@@ -567,6 +558,10 @@ where
         // they ride the same buffered write as the data, so the record costs
         // a buffer append instead of a second canonical spine-to-leaf edit.
         let entries = record.entries(batch.manifest())?;
+        // The caller's machinery entries (blob-index edits) ride the same
+        // batch as the revision record, so one seal covers data, record,
+        // and entries together.
+        let batch = batch.record(&store, self.entries).await?;
         let batch = batch.record(&store, entries).await?;
 
         // ONE seal covers the data writes and the record entries, into the

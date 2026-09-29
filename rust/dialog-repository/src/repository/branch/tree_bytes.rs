@@ -19,7 +19,6 @@ use std::collections::{BTreeMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
-use dialog_artifacts::history::TreeHistory;
 use dialog_artifacts::inspect::key_components;
 use dialog_artifacts::tree::{ArtifactTree, ArtifactTreeExt as _, TreeStorageBridge, spill_cache};
 use dialog_artifacts::{Artifact, ArtifactSelector, Datum, Instruction, Key, State, Value};
@@ -379,8 +378,7 @@ fn leaf_edges(bytes: Vec<u8>, codec: &BlockCodec) -> Result<String> {
 }
 
 /// Prints how many blocks a first screen reads that the head of a sealed
-/// feed tree does not name: the newest posts, the owner's name, and the
-/// author of each fact shown.
+/// feed tree does not name: the newest posts and the owner's name.
 #[dialog_common::test]
 #[ignore]
 async fn named_misses() -> Result<()> {
@@ -422,22 +420,16 @@ async fn named_misses() -> Result<()> {
                 named: Arc::new(named),
                 misses: Misses::default(),
             };
-            let history = TreeHistory::from_root(revision.tree.hash(), reader.clone());
             for selector in [
                 ArtifactSelector::new()
                     .of_starting_with("post:")
                     .with_limit(240),
                 ArtifactSelector::new().of(owner.parse()?),
             ] {
-                let views: Vec<_> = ArtifactTree::from_hash(root.clone())
+                let _views: Vec<_> = ArtifactTree::from_hash(root.clone())
                     .scan(reader.clone(), spill_cache(), selector)
                     .try_collect()
                     .await?;
-                for view in &views {
-                    for version in view.versions() {
-                        history.authorship(version).await?;
-                    }
-                }
             }
             let misses = reader
                 .misses

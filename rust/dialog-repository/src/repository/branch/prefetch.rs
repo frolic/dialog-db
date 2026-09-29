@@ -10,13 +10,9 @@
 //!
 //! The newest facts are the facts of the revisions with the highest
 //! editions. For each of these revisions, from the newest, the head names
-//! the nodes that hold its history records, its revision record, and the
-//! entity-ordered entries of its facts. A named entity-ordered leaf also
-//! holds older facts, and a reader shows those too. So the head then names
-//! the nodes that prove who wrote them. All names stop at a limit.
-//! These are the reads that show a fact with its author. Attribute-ordered
-//! and value-ordered entries are not named, because a first screen reads
-//! records by entity.
+//! the nodes that hold the entity-ordered entries of its facts. All names
+//! stop at a limit. Attribute-ordered and value-ordered entries are not
+//! named, because a first screen reads records by entity.
 
 use std::collections::HashSet;
 
@@ -45,9 +41,7 @@ pub const MOST_PREFETCHED_BYTES: usize = 1024 * 1024;
 pub const NEWEST_EDITIONS: u64 = 32;
 
 /// The nodes below the root of `revision`'s tree that its head names: the
-/// nodes that the reads of its newest revisions touch, newest first, and
-/// then the nodes that prove the authors of the other facts in the named
-/// entity-ordered leaves,
+/// nodes that the reads of its newest revisions touch, newest first,
 /// within [`MOST_PREFETCHED`] and [`MOST_PREFETCHED_BYTES`]. A head with
 /// no causal context names the top of the tree, as [`top_nodes`] reads it.
 pub async fn name_prefetch<S>(
@@ -70,28 +64,9 @@ where
     let reads = history.newest_reads(context, NEWEST_EDITIONS).await?;
 
     let mut named = Named::default();
-    let mut shown = HashSet::new();
     for read in &reads {
-        shown.insert(read.version);
         if !named.add(&root, &storage, &read.ranges).await? {
             break;
-        }
-    }
-    // A named entity-ordered leaf holds older facts beside the newest
-    // ones, and a reader shows them with their authors. So the head also
-    // names the nodes that prove who wrote them, while the names fit.
-    let mut at = 0;
-    'leaves: while at < named.nodes.len() {
-        let hash = named.nodes[at].clone();
-        at += 1;
-        for version in history.fact_versions(&hash).await? {
-            if shown.insert(version)
-                && !named
-                    .add(&root, &storage, &history.author_reads(version)?.ranges)
-                    .await?
-            {
-                break 'leaves;
-            }
         }
     }
     Ok(named.nodes.iter().map(|hash| *hash.as_bytes()).collect())
@@ -201,7 +176,6 @@ mod tests {
     wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_dedicated_worker);
 
     use anyhow::Result;
-    use dialog_artifacts::history::TreeHistory;
     use dialog_artifacts::tree::{
         ArtifactTree, ArtifactTreeExt as _, TreeStorageBridge, spill_cache,
     };
@@ -225,11 +199,10 @@ mod tests {
     }
 
     /// A reader that holds only the root and the nodes a head names shows
-    /// the newest facts with their authors, and an older fact beside them
-    /// with its author, and reads no other node. A larger tree is not
+    /// the newest facts, and reads no other node. A larger tree is not
     /// named whole.
     #[dialog_common::test]
-    async fn it_names_what_shows_the_newest_facts_with_their_authors() -> Result<()> {
+    async fn it_names_what_shows_the_newest_facts() -> Result<()> {
         show_newest(300, 200, 20).await
     }
 
@@ -295,7 +268,6 @@ mod tests {
                 .expect("a named node is stored");
             reader.set(*hash, block).await?;
         }
-        let history = TreeHistory::from_root(revision.tree.hash(), reader.clone());
         for (selector, rows) in [
             (
                 ArtifactSelector::new()
@@ -310,11 +282,6 @@ mod tests {
                 .try_collect()
                 .await?;
             assert_eq!(views.len(), rows);
-            for view in &views {
-                for version in view.versions() {
-                    history.authorship(version).await?;
-                }
-            }
         }
         Ok(())
     }

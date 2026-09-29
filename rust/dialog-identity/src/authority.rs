@@ -3,7 +3,6 @@
 //! [`Authority`] holds the profile and operator signers and implements
 //! the provider traits needed by `Operator` for identity effects.
 
-use dialog_capability::history::endorsement_payload;
 use dialog_capability::{Capability, Provider, Subject};
 use dialog_credentials::Signer;
 use dialog_effects::authority::{self, AuthorityError, Operator as AuthOperator};
@@ -24,7 +23,6 @@ pub struct Authority {
     profile: Signer,
     operator: Signer,
     account: Option<Did>,
-    endorsement: Vec<u8>,
 }
 
 impl Authority {
@@ -39,22 +37,7 @@ impl Authority {
             profile: profile.into(),
             operator: operator.into(),
             account: None,
-            endorsement: Vec::new(),
         }
-    }
-
-    /// The same authority, with the profile's endorsement of the operator.
-    /// A revision record carries the endorsement, so a reader can bind the
-    /// operator that signed a revision to this profile.
-    pub async fn endorsed(mut self) -> Result<Self, AuthorityError> {
-        let payload = endorsement_payload(self.operator_did().as_ref());
-        let signature = self
-            .profile
-            .sign(&payload)
-            .await
-            .map_err(|error| AuthorityError::Attestation(format!("{error}")))?;
-        self.endorsement = signature.to_bytes().to_vec();
-        Ok(self)
     }
 
     /// Set the account DID.
@@ -100,9 +83,9 @@ impl Authority {
                 profile: self.profile_did(),
                 account: self.account.clone(),
             })
-            .attenuate(
-                authority::Operator::new(self.operator_did()).endorsed(self.endorsement.clone()),
-            )
+            .attenuate(authority::Operator {
+                operator: self.operator_did(),
+            })
     }
 }
 

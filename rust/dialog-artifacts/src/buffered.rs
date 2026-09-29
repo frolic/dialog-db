@@ -44,14 +44,14 @@ use dialog_search_tree::{
     Manifest, TransientTree,
 };
 use dialog_storage::{Blake3Hash, DialogStorageError, StorageBackend};
-use futures_util::{Stream, TryStreamExt as _};
+use futures_util::Stream;
 use std::fmt::{Debug, Formatter, Result as FmtResult};
 use std::ops::RangeInclusive;
 use std::sync::{Arc, Mutex};
 
-use crate::history::{ClaimsDigest, Version};
+use crate::history::Version;
 use crate::tree::{ArtifactTree, TreeStorageBridge, WriteScope, write_instructions};
-use crate::{Datum, DialogArtifactsError, Instruction, Key, State, history_version_range};
+use crate::{Datum, DialogArtifactsError, Instruction, Key, State};
 
 /// The buffered counterpart of [`ArtifactTree`].
 ///
@@ -474,32 +474,6 @@ impl BufferedBatch {
     /// threshold, not the default.
     pub fn manifest(&self) -> &Manifest {
         &self.manifest
-    }
-
-    /// The [`ClaimsDigest`](crate::history::ClaimsDigest) of the history
-    /// records this batch wrote under `version`, read from the open buffered
-    /// tree, for the revision record to sign.
-    pub async fn claims<S>(
-        &self,
-        store: &S,
-        version: &Version,
-    ) -> Result<[u8; 32], DialogArtifactsError>
-    where
-        S: StorageBackend<Key = Blake3Hash, Value = Vec<u8>, Error = DialogStorageError>
-            + Clone
-            + ConditionalSync,
-    {
-        let storage = ContentAddressedStorage::new(TreeStorageBridge(store.clone()));
-        let (min, max) = history_version_range(version);
-        let stream = self.tree.scan(min..=max, &storage);
-        tokio::pin!(stream);
-        let mut digest = ClaimsDigest::new();
-        while let Some(entry) = stream.try_next().await? {
-            if let State::Added(datum) = &entry.value {
-                digest.add(&entry.key, datum);
-            }
-        }
-        Ok(digest.finish())
     }
 
     /// Appends pre-built record entries (revision lineage records, which enter

@@ -83,31 +83,6 @@ pub fn verify_issuer_signature(
         .map_err(|error| HistoryError::InvalidSignature(format!("Signature mismatch: {error}")))
 }
 
-/// The domain tag opening every endorsement payload. An endorsement is the
-/// authority's signature that names an issuer as a key it acts through, so a
-/// reader can bind a revision's issuer to its authority without a delegation
-/// chain. The tag keeps endorsement payloads apart from head and record
-/// payloads.
-pub const ENDORSEMENT_DOMAIN: &[u8] = b"dialog/endorsement@1\n";
-
-/// The bytes an authority signs to endorse `issuer`: the endorsement domain
-/// tag followed by the issuer's DID.
-pub fn endorsement_payload(issuer: &str) -> Vec<u8> {
-    let mut payload = ENDORSEMENT_DOMAIN.to_vec();
-    payload.extend_from_slice(issuer.as_bytes());
-    payload
-}
-
-/// Verify that `endorsement` is the signature of the key `authority` names
-/// over the [`endorsement_payload`] of `issuer`.
-pub fn verify_endorsement(
-    authority: &str,
-    issuer: &str,
-    endorsement: &[u8],
-) -> Result<(), HistoryError> {
-    verify_issuer_signature(authority, &endorsement_payload(issuer), endorsement)
-}
-
 impl Display for Issuer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0.to_base58())

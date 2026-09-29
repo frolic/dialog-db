@@ -69,30 +69,12 @@ impl Attenuation for Profile {
 pub struct Operator {
     /// The operator's DID (ephemeral session key).
     pub operator: Did,
-    /// The profile's signature that names this operator as a key the
-    /// profile acts through (see
-    /// `dialog_capability::history::endorsement_payload`). A revision
-    /// record carries it, so a reader can bind the operator to the
-    /// profile. Empty when the profile signed none.
-    #[serde(default, skip_serializing_if = "Vec::is_empty", with = "serde_bytes")]
-    pub endorsement: Vec<u8>,
 }
 
 impl Operator {
     /// Create a new operator.
     pub fn new(operator: Did) -> Self {
-        Self {
-            operator,
-            endorsement: Vec::new(),
-        }
-    }
-
-    /// The same operator, with the profile's endorsement of it.
-    pub fn endorsed(self, endorsement: Vec<u8>) -> Self {
-        Self {
-            endorsement,
-            ..self
-        }
+        Self { operator }
     }
 }
 
@@ -177,9 +159,6 @@ pub trait OperatorExt {
 
     /// The optional account DID from the authority chain.
     fn account(&self) -> &Option<Did>;
-
-    /// The profile's endorsement of the operator, empty when there is none.
-    fn endorsement(&self) -> &[u8];
 }
 
 impl OperatorExt for Capability<Operator> {
@@ -193,9 +172,5 @@ impl OperatorExt for Capability<Operator> {
 
     fn account(&self) -> &Option<Did> {
         &Profile::of(self).account
-    }
-
-    fn endorsement(&self) -> &[u8] {
-        &Operator::of(self).endorsement
     }
 }
