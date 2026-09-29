@@ -145,6 +145,7 @@ fn field(entity: &Entity, attribute: &str, value: Value) -> Result<Artifact, Dia
         of: entity.clone(),
         is: value,
         cause: None,
+        meta: None,
     })
 }
 
@@ -683,6 +684,7 @@ mod tests {
                 of: "user:mallory".parse()?,
                 is: Value::String("did:key:zForged".to_string()),
                 cause: None,
+                meta: None,
             })]))
             .perform(&operator)
             .await;

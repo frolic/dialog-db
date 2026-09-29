@@ -1097,6 +1097,7 @@ mod tests {
             of: "document:large".parse()?,
             is: large,
             cause: None,
+            meta: None,
         }));
         branch.commit(stream::iter(facts)).perform(&env).await?;
 

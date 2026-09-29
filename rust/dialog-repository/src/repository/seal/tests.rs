@@ -46,6 +46,7 @@ fn note(index: usize, body: &str) -> Result<Instruction> {
         of: format!("note:{index}").parse()?,
         is: Value::String(body.to_string()),
         cause: None,
+        meta: None,
     }))
 }
 

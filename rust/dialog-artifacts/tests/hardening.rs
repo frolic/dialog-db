@@ -49,6 +49,7 @@ async fn it_derives_sort_keys_identical_to_the_field_path() -> Result<()> {
     let mut instructions = Vec::new();
     for (at, value) in probe_values().into_iter().enumerate() {
         instructions.push(Instruction::Assert(Artifact {
+            meta: None,
             the: Attribute::from_str("hardening/value")?,
             of: entity(at as u32),
             is: value,
@@ -93,6 +94,7 @@ async fn it_separates_sort_keys_by_value_identity() -> Result<()> {
         of: of.clone(),
         is,
         cause: None,
+        meta: None,
     };
 
     // Same raw payload bytes, different types: must not collide.
@@ -177,12 +179,14 @@ async fn it_elects_the_higher_cause_in_either_order() -> Result<()> {
         of: of.clone(),
         is: Value::String("Alice".into()),
         cause: Some(Cause([1u8; 32])),
+        meta: None,
     };
     let newer = Artifact {
         the: attr,
         of,
         is: Value::String("Alicia".into()),
         cause: Some(Cause([2u8; 32])),
+        meta: None,
     };
 
     let winner = ArtifactView::from(older.clone()).elect(newer.clone().into())?;
@@ -208,12 +212,14 @@ async fn it_breaks_election_ties_deterministically() -> Result<()> {
         of: of.clone(),
         is: Value::String("Alice".into()),
         cause: Some(Cause([1u8; 32])),
+        meta: None,
     };
     let b = Artifact {
         the: attr.clone(),
         of: of.clone(),
         is: Value::String("Alicia".into()),
         cause: Some(Cause([1u8; 32])),
+        meta: None,
     };
 
     let ab = ArtifactView::from(a.clone()).elect(b.clone().into())?;
@@ -229,6 +235,7 @@ async fn it_breaks_election_ties_deterministically() -> Result<()> {
         of,
         is: Value::String("Anon".into()),
         cause: None,
+        meta: None,
     };
     let winner = ArtifactView::from(uncaused.clone()).elect(a.clone().into())?;
     assert_eq!(

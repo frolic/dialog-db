@@ -81,6 +81,7 @@ fn generate(seed: u64, op_count: usize) -> Vec<Instruction> {
                     of,
                     is: value(&mut rng),
                     cause: None,
+                    meta: None,
                 };
                 live.push(artifact.clone());
                 Instruction::Assert(artifact)
@@ -93,6 +94,7 @@ fn generate(seed: u64, op_count: usize) -> Vec<Instruction> {
                     of: of.clone(),
                     is: value(&mut rng),
                     cause: None,
+                    meta: None,
                 };
                 live.retain(|held| !(held.the == the && held.of == of));
                 live.push(artifact.clone());
@@ -111,6 +113,7 @@ fn generate(seed: u64, op_count: usize) -> Vec<Instruction> {
                 of,
                 is: Value::String("never-asserted".into()),
                 cause: None,
+                meta: None,
             }),
         };
         ops.push(instruction);

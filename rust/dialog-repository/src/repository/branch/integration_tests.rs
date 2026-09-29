@@ -116,6 +116,7 @@ async fn it_pushes_to_s3_remote(s3: S3Address) -> Result<()> {
         of: "user:1".parse()?,
         is: Value::String("Alice".into()),
         cause: None,
+        meta: None,
     };
     branch
         .commit(stream::iter(vec![Instruction::Assert(artifact)]))
@@ -138,6 +139,7 @@ async fn it_fetches_from_s3_remote(s3: S3Address) -> Result<()> {
         of: "user:1".parse()?,
         is: Value::String("Alice".into()),
         cause: None,
+        meta: None,
     };
     branch
         .commit(stream::iter(vec![Instruction::Assert(artifact)]))
@@ -162,6 +164,7 @@ async fn it_push_and_pull_roundtrip(s3: S3Address) -> Result<()> {
         of: "user:1".parse()?,
         is: Value::String("Alice".into()),
         cause: None,
+        meta: None,
     };
     branch
         .commit(stream::iter(vec![Instruction::Assert(artifact)]))
@@ -1247,6 +1250,7 @@ async fn it_pull_returns_none_when_no_changes(s3: S3Address) -> Result<()> {
         of: "user:1".parse()?,
         is: Value::String("Alice".into()),
         cause: None,
+        meta: None,
     };
     branch
         .commit(stream::iter(vec![Instruction::Assert(artifact)]))
@@ -1278,6 +1282,7 @@ async fn it_pushes_and_pulls_data_between_repos(s3: S3Address) -> Result<()> {
         of: "user:alice".parse()?,
         is: Value::String("Alice".into()),
         cause: None,
+        meta: None,
     };
     alice_branch
         .commit(stream::iter(vec![Instruction::Assert(artifact)]))
@@ -1346,6 +1351,7 @@ async fn it_prefetches_the_named_top_and_merges_a_fetched_head(s3: S3Address) ->
             of: entity.parse()?,
             is: Value::String(body.into()),
             cause: None,
+            meta: None,
         }))
     };
     alice_branch
@@ -1483,6 +1489,7 @@ async fn it_keeps_a_retraction_through_a_concurrent_pull(s3: S3Address) -> Resul
         of: "user:alice".parse()?,
         is: Value::String("Alice".into()),
         cause: None,
+        meta: None,
     };
     alice_branch
         .commit(stream::iter(vec![Instruction::Assert(fact.clone())]))
@@ -1516,6 +1523,7 @@ async fn it_keeps_a_retraction_through_a_concurrent_pull(s3: S3Address) -> Resul
         of: "user:carol".parse()?,
         is: Value::String("Carol".into()),
         cause: None,
+        meta: None,
     };
     alice_branch
         .commit(stream::iter(vec![Instruction::Assert(unrelated)]))
@@ -1611,6 +1619,7 @@ async fn it_pushes_novelty_after_adopting_the_upstream_head_by_reference(
                     of: format!("user:{batch}-{i}").parse().expect("valid entity"),
                     is: Value::String(format!("resident-{batch}-{i}")),
                     cause: None,
+                    meta: None,
                 })
             })
             .collect();
@@ -1659,6 +1668,7 @@ async fn it_pushes_novelty_after_adopting_the_upstream_head_by_reference(
             of: "user:bob".parse()?,
             is: Value::String("Bob".into()),
             cause: None,
+            meta: None,
         })]))
         .perform(&env)
         .await?;
@@ -1704,6 +1714,7 @@ async fn it_bridges_foreign_bulk_to_a_second_remote(s3: S3Address) -> Result<()>
                     of: format!("user:{batch}-{i}").parse().expect("valid entity"),
                     is: Value::String(format!("resident-{batch}-{i}")),
                     cause: None,
+                    meta: None,
                 })
             })
             .collect();
@@ -1713,6 +1724,7 @@ async fn it_bridges_foreign_bulk_to_a_second_remote(s3: S3Address) -> Result<()>
                 of: "doc:big".parse()?,
                 is: Value::String(big.clone()),
                 cause: None,
+                meta: None,
             }));
         }
         alice_branch
@@ -1842,6 +1854,7 @@ async fn it_bridges_foreign_bulk_to_a_second_remote(s3: S3Address) -> Result<()>
             of: "user:bridge".parse()?,
             is: Value::String("Bridge".into()),
             cause: None,
+            meta: None,
         })]))
         .perform(&operator)
         .await?;
@@ -2274,6 +2287,7 @@ async fn it_forwards_content_adopted_through_a_local_upstream(s3: S3Address) -> 
                     of: format!("user:{batch}-{i}").parse().expect("valid entity"),
                     is: Value::String(format!("resident-{batch}-{i}")),
                     cause: None,
+                    meta: None,
                 })
             })
             .collect();
@@ -2403,6 +2417,7 @@ async fn it_two_party_convergence(s3: S3Address) -> Result<()> {
             of: "user:alice".parse()?,
             is: Value::String("Alice".into()),
             cause: None,
+            meta: None,
         })]))
         .perform(&operator)
         .await?;
@@ -2440,6 +2455,7 @@ async fn it_two_party_convergence(s3: S3Address) -> Result<()> {
             of: "user:bob".parse()?,
             is: Value::String("Bob".into()),
             cause: None,
+            meta: None,
         })]))
         .perform(&operator)
         .await?;
@@ -2918,6 +2934,7 @@ async fn it_authorizes_via_migrated_credentials(ucan: UcanS3Address) -> Result<(
             of: "user:alice".parse()?,
             is: Value::String("Alice".into()),
             cause: None,
+            meta: None,
         })]))
         .perform(&alice_operator)
         .await?;
@@ -3083,6 +3100,7 @@ async fn it_collaborates_via_ucan_delegation(ucan: UcanS3Address) -> Result<()> 
             of: "user:alice".parse()?,
             is: Value::String("Alice".into()),
             cause: None,
+            meta: None,
         })]))
         .perform(&alice_operator)
         .await?;
@@ -3160,6 +3178,7 @@ async fn it_collaborates_via_ucan_delegation(ucan: UcanS3Address) -> Result<()> 
             of: "user:bob".parse()?,
             is: Value::String("Bob".into()),
             cause: None,
+            meta: None,
         })]))
         .perform(&bob_operator)
         .await?;
@@ -3235,6 +3254,7 @@ async fn it_pushes_and_pulls_via_ucan(ucan: UcanS3Address) -> Result<()> {
             of: "user:ucan-test".parse()?,
             is: Value::String("UCAN User".into()),
             cause: None,
+            meta: None,
         })]))
         .perform(&operator)
         .await?;
@@ -3280,6 +3300,7 @@ async fn it_replicates_on_demand_and_caches_locally(s3: S3Address) -> Result<()>
             of: "user:alice".parse()?,
             is: Value::String("Alice".into()),
             cause: None,
+            meta: None,
         })]))
         .perform(&operator)
         .await?;
@@ -3418,6 +3439,7 @@ async fn it_delegates_and_pushes_to_s3(s3: S3Address) -> Result<()> {
             of: "user:delegated".parse()?,
             is: Value::String("Delegated Push".into()),
             cause: None,
+            meta: None,
         })]))
         .perform(&operator)
         .await?;
@@ -3488,6 +3510,7 @@ async fn it_delegates_pushes_and_pulls_via_s3(s3: S3Address) -> Result<()> {
             of: "user:alice".parse()?,
             is: Value::String("Alice Delegated".into()),
             cause: None,
+            meta: None,
         })]))
         .perform(&alice_operator)
         .await?;
@@ -3596,6 +3619,7 @@ async fn it_downloads_missing_content_when_the_reach_asks_for_it(s3: S3Address) 
         of: "document:one".parse()?,
         is: Value::String("downloaded on demand".repeat(64)),
         cause: None,
+        meta: None,
     })];
     branch_a
         .commit(stream::iter(facts))
@@ -3779,6 +3803,7 @@ async fn it_downloads_spilled_values_a_pull_never_shipped(s3: S3Address) -> Resu
             "retired".repeat(dialog_search_tree::Manifest::default().inline_n as usize + 1),
         ),
         cause: None,
+        meta: None,
     };
     branch_a
         .commit(stream::iter(vec![Instruction::Assert(retracted.clone())]))
@@ -3828,6 +3853,7 @@ async fn it_downloads_spilled_values_a_pull_never_shipped(s3: S3Address) -> Resu
             of: "note:local".parse()?,
             is: Value::String("site B novelty".into()),
             cause: None,
+            meta: None,
         })]))
         .perform(&operator_b)
         .await?;
@@ -4087,6 +4113,7 @@ async fn it_downloads_only_the_operational_regions(s3: S3Address) -> Result<()> 
                     // prune, and the whole point is the pruning.
                     is: Value::String(format!("resident-{round}-{i}").repeat(24)),
                     cause: None,
+                    meta: None,
                 })
             })
             .collect();
@@ -4211,6 +4238,7 @@ async fn it_downloads_one_block_at_a_time(s3: S3Address) -> Result<()> {
                     of: format!("user:{round}-{i}").parse().expect("valid entity"),
                     is: Value::String(format!("resident-{round}-{i}").repeat(24)),
                     cause: None,
+                    meta: None,
                 })
             })
             .collect();
@@ -4261,6 +4289,7 @@ async fn it_downloads_one_block_at_a_time(s3: S3Address) -> Result<()> {
                 of: format!("post:{i}").parse().expect("valid entity"),
                 is: Value::String(format!("ours-{i}").repeat(24)),
                 cause: None,
+                meta: None,
             })
         })
         .collect();
@@ -4355,6 +4384,7 @@ async fn it_downloads_one_block_at_a_time_over_ucan(ucan: UcanS3Address) -> Resu
                     of: format!("user:{round}-{i}").parse().expect("valid entity"),
                     is: Value::String(format!("resident-{round}-{i}").repeat(24)),
                     cause: None,
+                    meta: None,
                 })
             })
             .collect();
@@ -4477,6 +4507,7 @@ async fn it_downloads_serially_while_pushing_concurrently(ucan: UcanS3Address) -
                     of: format!("user:{round}-{i}").parse().expect("valid entity"),
                     is: Value::String(format!("resident-{round}-{i}").repeat(24)),
                     cause: None,
+                    meta: None,
                 })
             })
             .collect();
@@ -4540,6 +4571,7 @@ async fn it_downloads_serially_while_pushing_concurrently(ucan: UcanS3Address) -
                 of: format!("post:{i}").parse().expect("valid entity"),
                 is: Value::String(format!("ours-{i}").repeat(24)),
                 cause: None,
+                meta: None,
             })
         })
         .collect();
@@ -4772,6 +4804,7 @@ async fn it_downloads_delegation_blobs_concurrently(ucan: UcanS3Address) -> Resu
                 of: format!("device:{i}").parse().expect("valid entity"),
                 is: Value::String(format!("device-{i}").repeat(24)),
                 cause: None,
+                meta: None,
             })
         })
         .collect();
@@ -5349,6 +5382,7 @@ async fn it_refuses_a_push_whose_cached_upstream_went_stale(s3: S3Address) -> Re
             of: "user:alice".parse()?,
             is: Value::String("Alice".into()),
             cause: None,
+            meta: None,
         })]))
         .perform(&operator)
         .await?;
@@ -5383,6 +5417,7 @@ async fn it_refuses_a_push_whose_cached_upstream_went_stale(s3: S3Address) -> Re
             of: "user:alice-again".parse()?,
             is: Value::String("Alice again".into()),
             cause: None,
+            meta: None,
         })]))
         .perform(&operator)
         .await?;
@@ -5399,6 +5434,7 @@ async fn it_refuses_a_push_whose_cached_upstream_went_stale(s3: S3Address) -> Re
             of: "user:bob".parse()?,
             is: Value::String("Bob".into()),
             cause: None,
+            meta: None,
         })]))
         .perform(&operator)
         .await?;
@@ -5450,6 +5486,7 @@ async fn it_refuses_an_assumed_push_whose_upstream_moved(s3: S3Address) -> Resul
             of: "user:alice".parse()?,
             is: Value::String("Alice".into()),
             cause: None,
+            meta: None,
         })]))
         .perform(&operator)
         .await?;
@@ -5480,6 +5517,7 @@ async fn it_refuses_an_assumed_push_whose_upstream_moved(s3: S3Address) -> Resul
             of: "user:alice-again".parse()?,
             is: Value::String("Alice again".into()),
             cause: None,
+            meta: None,
         })]))
         .perform(&operator)
         .await?;
@@ -5495,6 +5533,7 @@ async fn it_refuses_an_assumed_push_whose_upstream_moved(s3: S3Address) -> Resul
             of: "user:bob".parse()?,
             is: Value::String("Bob".into()),
             cause: None,
+            meta: None,
         })]))
         .perform(&operator)
         .await?;

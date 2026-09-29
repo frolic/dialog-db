@@ -668,6 +668,7 @@ mod tests {
                         ))?,
                         is: Value::String(format!("value {n}")),
                         cause: None,
+                        meta: None,
                     }))
                 })
                 .collect()
@@ -739,6 +740,7 @@ mod tests {
                     of: of.clone(),
                     is,
                     cause: None,
+                    meta: None,
                 });
             };
             push(
@@ -929,6 +931,7 @@ mod tests {
                 of,
                 is,
                 cause: None,
+                meta: None,
             });
         }
         let fact_count = artifacts_in.len();
@@ -1160,12 +1163,14 @@ mod tests {
                 of: Entity::new()?,
                 is: Value::String("Foo Bar".into()),
                 cause: None,
+                meta: None,
             },
             Artifact {
                 the: Attribute::from_str("profile/name")?,
                 of: Entity::new()?,
                 is: Value::String("Fizz Buzz".into()),
                 cause: None,
+                meta: None,
             },
         ];
 
@@ -1201,12 +1206,14 @@ mod tests {
             of: "did:key:z6MkQmQKzPsjyUz49pvaxYdiiZEuQXyNqeBkS88GTrvqnov".parse()?,
             is: Value::String("Alice".into()),
             cause: None,
+            meta: None,
         };
         let bob = Artifact {
             the: Attribute::from_str("person/name")?,
             of: "did:key:z6MkDiL3ZaJ4V7VSdQruLenZLA4RNbu6cErR5m8K5Wj99wTF".parse()?,
             is: Value::String("Bob".into()),
             cause: None,
+            meta: None,
         };
 
         facts
@@ -1252,6 +1259,7 @@ mod tests {
                 of: Entity::new()?,
                 is: Value::String("Alice".into()),
                 cause: None,
+                meta: None,
             })))
             .await?;
 
@@ -1262,6 +1270,7 @@ mod tests {
                 of: Entity::new()?,
                 is: Value::String("ephemeral".into()),
                 cause: None,
+                meta: None,
             })))
             .await?;
 
@@ -1291,6 +1300,7 @@ mod tests {
                 of: Entity::new()?,
                 is: Value::String("Alice".into()),
                 cause: None,
+                meta: None,
             })))
             .await?;
         let base_root = facts.canonicalize().await?;
@@ -1301,6 +1311,7 @@ mod tests {
             of: Entity::new()?,
             is: Value::String("ephemeral".into()),
             cause: None,
+            meta: None,
         };
         facts
             .commit(vec![
@@ -1340,6 +1351,7 @@ mod tests {
             of: Entity::new()?,
             is: Value::String("Alice".into()),
             cause: None,
+            meta: None,
         };
 
         // Commit the fact so it has a durable prior.
@@ -1386,18 +1398,21 @@ mod tests {
                 of: alice.clone(),
                 is: Value::String("Alice".into()),
                 cause: None,
+                meta: None,
             },
             Artifact {
                 the: Attribute::from_str("person/age")?,
                 of: alice.clone(),
                 is: Value::UnsignedInt(40),
                 cause: None,
+                meta: None,
             },
             Artifact {
                 the: Attribute::from_str("group/name")?,
                 of: alice,
                 is: Value::String("Admins".into()),
                 cause: None,
+                meta: None,
             },
         ];
         facts
@@ -1434,18 +1449,21 @@ mod tests {
                 of: alice.clone(),
                 is: Value::String("Alice".into()),
                 cause: None,
+                meta: None,
             },
             Artifact {
                 the: Attribute::from_str("person/age")?,
                 of: alice.clone(),
                 is: Value::UnsignedInt(40),
                 cause: None,
+                meta: None,
             },
             Artifact {
                 the: Attribute::from_str("group/name")?,
                 of: alice.clone(),
                 is: Value::String("Admins".into()),
                 cause: None,
+                meta: None,
             },
         ];
         facts
@@ -1512,6 +1530,7 @@ mod tests {
             of: list.clone(),
             is: Value::String(attribute.to_string()),
             cause: None,
+            meta: None,
         });
         facts
             .commit(data.into_iter().map(Instruction::Assert))
@@ -1573,6 +1592,7 @@ mod tests {
             of: entity,
             is: Value::String(value.into()),
             cause: None,
+            meta: None,
         };
 
         // Short prefixes (within the raw head) discriminate on key
@@ -1638,6 +1658,7 @@ mod tests {
                     of: Entity::from_str(&format!("urn:item:{index:02}")).expect("an entity"),
                     is: Value::String(format!("item {index}")),
                     cause: None,
+                    meta: None,
                 })
             }))
             .await?;
@@ -1679,18 +1700,21 @@ mod tests {
                 of: alice.clone(),
                 is: Value::String("Alice".into()),
                 cause: None,
+                meta: None,
             },
             Artifact {
                 the: Attribute::from_str("person/city")?,
                 of: alice.clone(),
                 is: Value::String("Albuquerque".into()),
                 cause: None,
+                meta: None,
             },
             Artifact {
                 the: Attribute::from_str("person/name")?,
                 of: bob.clone(),
                 is: Value::String("Bob".into()),
                 cause: None,
+                meta: None,
             },
             // A non-string value that must never match a string prefix.
             Artifact {
@@ -1698,6 +1722,7 @@ mod tests {
                 of: alice,
                 is: Value::UnsignedInt(40),
                 cause: None,
+                meta: None,
             },
         ];
         facts
@@ -1766,6 +1791,7 @@ mod tests {
                     of: Entity::new()?,
                     is,
                     cause: None,
+                    meta: None,
                 })
             })
             .collect::<anyhow::Result<_>>()?;
@@ -1797,12 +1823,14 @@ mod tests {
                     of: mixed.clone(),
                     is: Value::UnsignedInt(40),
                     cause: None,
+                    meta: None,
                 }),
                 Instruction::Assert(Artifact {
                     the: Attribute::from_str("record/label")?,
                     of: mixed.clone(),
                     is: Value::String("labelled".into()),
                     cause: None,
+                    meta: None,
                 }),
             ])
             .await?;
@@ -1874,12 +1902,14 @@ mod tests {
                     of: Entity::new()?,
                     is: Value::String(apple.clone()),
                     cause: None,
+                    meta: None,
                 }),
                 Instruction::Assert(Artifact {
                     the: body.clone(),
                     of: Entity::new()?,
                     is: Value::String(zebra.clone()),
                     cause: None,
+                    meta: None,
                 }),
             ])
             .await?;
@@ -1930,12 +1960,14 @@ mod tests {
                     of: both.clone(),
                     is: Value::String(apple.clone()),
                     cause: None,
+                    meta: None,
                 }),
                 Instruction::Assert(Artifact {
                     the: body,
                     of: both.clone(),
                     is: Value::String(zebra.clone()),
                     cause: None,
+                    meta: None,
                 }),
             ])
             .await?;
@@ -1980,6 +2012,7 @@ mod tests {
                 of: Entity::new()?,
                 is: Value::String(value.into()),
                 cause: None,
+                meta: None,
             });
         }
         facts
@@ -2044,6 +2077,7 @@ mod tests {
                     of: Entity::new()?,
                     is: Value::Float(float),
                     cause: None,
+                    meta: None,
                 })
             })
             .collect::<anyhow::Result<_>>()?;
@@ -2096,6 +2130,7 @@ mod tests {
                 of: alice.clone(),
                 is: Value::UnsignedInt(20),
                 cause: None,
+                meta: None,
             },
             // Spills: well over the inline threshold, and begins with "Zzz".
             Artifact {
@@ -2103,6 +2138,7 @@ mod tests {
                 of: alice.clone(),
                 is: Value::String("Zzz".repeat(inline_n)),
                 cause: None,
+                meta: None,
             },
             // Inline integer whose big-endian payload begins 0x41 0x6C ("Al"),
             // on its own entity so it cannot satisfy alice's numeric range.
@@ -2111,6 +2147,7 @@ mod tests {
                 of: bob.clone(),
                 is: Value::UnsignedInt(0x416Cu128 << 112),
                 cause: None,
+                meta: None,
             },
         ];
         facts
@@ -2207,6 +2244,7 @@ mod tests {
                 // this in real data).
                 is: Value::Float(index as f64 * 1.5 - 100.0),
                 cause: None,
+                meta: None,
             });
         }
         data.push(Artifact {
@@ -2214,6 +2252,7 @@ mod tests {
             of: Entity::new()?,
             is: Value::Float(1783112056217.0),
             cause: None,
+            meta: None,
         });
         let expected = data.len();
         facts
@@ -2252,6 +2291,7 @@ mod tests {
                 of: Entity::new()?,
                 is: Value::UnsignedInt(value),
                 cause: None,
+                meta: None,
             })
         };
         let mut data = Vec::new();
@@ -2264,6 +2304,7 @@ mod tests {
             of: Entity::new()?,
             is: Value::String("not a number".into()),
             cause: None,
+            meta: None,
         });
         facts
             .commit(data.into_iter().map(Instruction::Assert))
@@ -2441,6 +2482,7 @@ mod tests {
 
         assert_eq!(
             vec![Artifact {
+                meta: None,
                 the: attribute,
                 of: entity,
                 is: name,
@@ -2506,6 +2548,7 @@ mod tests {
 
         assert_eq!(
             vec![Artifact {
+                meta: None,
                 the: attribute,
                 of: entity,
                 is: name,
@@ -2672,6 +2715,7 @@ mod tests {
                 of: Entity::new().unwrap(),
                 is: value,
                 cause: None,
+                meta: None,
             })
             .map(Instruction::Assert);
 
@@ -2702,6 +2746,7 @@ mod tests {
                 of: Entity::new().unwrap(),
                 is: value,
                 cause: None,
+                meta: None,
             })
             .map(Instruction::Assert);
 
@@ -2809,6 +2854,7 @@ mod tests {
             of: entity.clone(),
             is: Value::Boolean(false),
             cause: None,
+            meta: None,
         };
 
         artifacts.commit([Instruction::Assert(artifact)]).await?;
@@ -2819,6 +2865,7 @@ mod tests {
             of: entity.clone(),
             is: Value::Boolean(true),
             cause: None,
+            meta: None,
         };
 
         artifacts
@@ -2950,6 +2997,7 @@ mod tests {
                 of: entity.clone(),
                 is: value.clone(),
                 cause: None,
+                meta: None,
             })])
             .await?;
 
@@ -2984,6 +3032,7 @@ mod tests {
                 of: entity.clone(),
                 is: value.clone(),
                 cause: None,
+                meta: None,
             })])
             .await?;
 
@@ -3065,6 +3114,7 @@ mod tests {
                 of: entity.clone(),
                 is: value.clone(),
                 cause: None,
+                meta: None,
             })])
             .await?;
 
@@ -3111,6 +3161,7 @@ mod tests {
                 of: entity.clone(),
                 is: value.clone(),
                 cause: None,
+                meta: None,
             })])
             .await?;
 
@@ -3157,6 +3208,7 @@ mod tests {
                 of: entity.clone(),
                 is: value.clone(),
                 cause: None,
+                meta: None,
             })])
             .await?;
 
@@ -3209,6 +3261,7 @@ mod tests {
                     of: entity.clone(),
                     is: value.clone(),
                     cause: None,
+                    meta: None,
                 })])
                 .await?;
             let block = artifacts.storage.get(&value.to_reference()).await?;
@@ -3264,6 +3317,7 @@ mod tests {
                     of: entity.clone(),
                     is: value.clone(),
                     cause: None,
+                    meta: None,
                 })])
                 .await?;
             let results = artifacts
@@ -3295,6 +3349,7 @@ mod tests {
                 of: entity.clone(),
                 is,
                 cause: None,
+                meta: None,
             };
             artifacts
                 .commit(vec![Instruction::Replace(of_the(spilled_prior.clone()))])
@@ -3331,6 +3386,7 @@ mod tests {
             of: entity.clone(),
             is: value.clone(),
             cause: None,
+            meta: None,
         };
         artifacts
             .commit(vec![Instruction::Assert(fact.clone())])
@@ -3368,12 +3424,14 @@ mod tests {
                     of: a,
                     is: value.clone(),
                     cause: None,
+                    meta: None,
                 }),
                 Instruction::Assert(Artifact {
                     the: attribute.clone(),
                     of: b,
                     is: value.clone(),
                     cause: None,
+                    meta: None,
                 }),
             ])
             .await?;
@@ -3407,6 +3465,7 @@ mod tests {
             of: Entity::new()?,
             is: value.clone(),
             cause: None,
+            meta: None,
         };
         let key = EntityKey::from_artifact(&artifact, &default_manifest()).into_key();
         // A store that never had the block written.
@@ -3435,6 +3494,7 @@ mod tests {
                     of: Entity::new()?,
                     is: value,
                     cause: None,
+                    meta: None,
                 })])
                 .await?;
         }

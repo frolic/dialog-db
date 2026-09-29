@@ -168,6 +168,7 @@ pub(crate) fn tombstones_from(changes: &Changes) -> HashSet<SortKey> {
                 of: entity.clone(),
                 is: value.clone(),
                 cause: None,
+                meta: None,
             };
             tombstones.insert(default_sort_key(&artifact));
         }
@@ -228,6 +229,7 @@ mod tests {
             of: of.parse().expect("entity"),
             is: Value::String(is.into()),
             cause: None,
+            meta: None,
         }
     }
 

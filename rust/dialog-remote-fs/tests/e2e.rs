@@ -94,6 +94,7 @@ fn artifact(of: &str, name: &str) -> Result<Artifact> {
         of: of.parse()?,
         is: Value::String(name.into()),
         cause: None,
+        meta: None,
     })
 }
 

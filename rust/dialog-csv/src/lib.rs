@@ -36,18 +36,21 @@ mod tests {
                 of: "user:alice".parse().unwrap(),
                 is: Value::String("Alice".into()),
                 cause: None,
+                meta: None,
             },
             Artifact {
                 the: "user/email".parse().unwrap(),
                 of: "user:alice".parse().unwrap(),
                 is: Value::String("alice@example.com".into()),
                 cause: None,
+                meta: None,
             },
             Artifact {
                 the: "user/name".parse().unwrap(),
                 of: "user:bob".parse().unwrap(),
                 is: Value::String("Bob".into()),
                 cause: None,
+                meta: None,
             },
         ]
     }
@@ -119,48 +122,56 @@ mod tests {
                 of: "item:1".parse().unwrap(),
                 is: Value::String("hello world".into()),
                 cause: None,
+                meta: None,
             },
             Artifact {
                 the: "test/uint".parse().unwrap(),
                 of: "item:1".parse().unwrap(),
                 is: Value::UnsignedInt(12345),
                 cause: None,
+                meta: None,
             },
             Artifact {
                 the: "test/sint".parse().unwrap(),
                 of: "item:1".parse().unwrap(),
                 is: Value::SignedInt(-42),
                 cause: None,
+                meta: None,
             },
             Artifact {
                 the: "test/bool".parse().unwrap(),
                 of: "item:1".parse().unwrap(),
                 is: Value::Boolean(false),
                 cause: None,
+                meta: None,
             },
             Artifact {
                 the: "test/float".parse().unwrap(),
                 of: "item:1".parse().unwrap(),
                 is: Value::Float(1.23),
                 cause: None,
+                meta: None,
             },
             Artifact {
                 the: "test/bytes".parse().unwrap(),
                 of: "item:1".parse().unwrap(),
                 is: Value::Bytes(vec![0xDE, 0xAD, 0xBE, 0xEF]),
                 cause: None,
+                meta: None,
             },
             Artifact {
                 the: "test/entity".parse().unwrap(),
                 of: "item:1".parse().unwrap(),
                 is: Value::Entity("ref:other".parse().unwrap()),
                 cause: None,
+                meta: None,
             },
             Artifact {
                 the: "test/symbol".parse().unwrap(),
                 of: "item:1".parse().unwrap(),
                 is: Value::Symbol("meta/attribute".parse().unwrap()),
                 cause: None,
+                meta: None,
             },
         ];
 
@@ -180,6 +191,7 @@ mod tests {
             of: "item:1".parse().unwrap(),
             is: Value::String("v1".into()),
             cause: None,
+            meta: None,
         };
         let cause = Cause::from(&base);
         let updated = Artifact {
@@ -187,6 +199,7 @@ mod tests {
             of: "item:1".parse().unwrap(),
             is: Value::String("v2".into()),
             cause: Some(cause.clone()),
+            meta: None,
         };
 
         let csv = export_artifacts(std::slice::from_ref(&updated)).await;

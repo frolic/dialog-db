@@ -132,6 +132,7 @@ fn fact(of: &str, is: &str) -> Artifact {
         of: of.parse().expect("entity parses"),
         is: Value::String(is.to_string()),
         cause: None,
+        meta: None,
     }
 }
 
@@ -552,6 +553,7 @@ async fn it_rejects_writes_to_the_reserved_namespace() -> Result<()> {
         of: "forged:revision".parse()?,
         is: Value::String("lies".to_string()),
         cause: None,
+        meta: None,
     };
     let result = snapshot
         .commit(stream::iter(vec![Instruction::Assert(forged)]))

@@ -36,6 +36,7 @@ pub fn generate_data(entity_count: usize) -> Result<Vec<Artifact>> {
             of: entity.clone(),
             is: Value::Symbol(parent_attribute.clone()),
             cause: None,
+            meta: None,
         });
 
         data.push(Artifact {
@@ -43,6 +44,7 @@ pub fn generate_data(entity_count: usize) -> Result<Vec<Artifact>> {
             of: entity.clone(),
             is: Value::UnsignedInt(i as u128),
             cause: None,
+            meta: None,
         });
 
         data.push(Artifact {
@@ -50,6 +52,7 @@ pub fn generate_data(entity_count: usize) -> Result<Vec<Artifact>> {
             of: entity.clone(),
             is: Value::String(format!("name{i}")),
             cause: None,
+            meta: None,
         });
 
         if let Some(parent_entity) = last_entity {
@@ -58,6 +61,7 @@ pub fn generate_data(entity_count: usize) -> Result<Vec<Artifact>> {
                 of: entity.clone(),
                 is: Value::Entity(parent_entity.clone()),
                 cause: None,
+                meta: None,
             });
         }
 
@@ -66,6 +70,7 @@ pub fn generate_data(entity_count: usize) -> Result<Vec<Artifact>> {
             of: make_entity(),
             is: Value::Entity(entity.clone()),
             cause: None,
+            meta: None,
         });
 
         last_entity = Some(entity);

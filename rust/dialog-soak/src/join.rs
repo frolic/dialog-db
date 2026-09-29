@@ -194,6 +194,7 @@ fn entity_facts(index: usize) -> Result<Vec<Instruction>> {
                 of: of.clone(),
                 is,
                 cause: None,
+                meta: None,
             }))
         })
         .collect()
@@ -206,6 +207,7 @@ fn meta_facts(members: usize) -> Result<Vec<Instruction>> {
         of: "id:space".parse()?,
         is: Value::String("soak space".into()),
         cause: None,
+        meta: None,
     })];
     for member in 0..members {
         let of: dialog_artifacts::Entity = format!("member:{member}").parse()?;
@@ -214,12 +216,14 @@ fn meta_facts(members: usize) -> Result<Vec<Instruction>> {
             of: of.clone(),
             is: Value::String(format!("Member {member}")),
             cause: None,
+            meta: None,
         }));
         facts.push(Instruction::Assert(Artifact {
             the: "member/role".parse()?,
             of,
             is: Value::String(if member == 0 { "owner" } else { "editor" }.into()),
             cause: None,
+            meta: None,
         }));
     }
     Ok(facts)
@@ -279,18 +283,21 @@ fn claim_facts() -> Result<Vec<Instruction>> {
             of: of.clone(),
             is: Value::String("The Joiner".into()),
             cause: None,
+            meta: None,
         }),
         Instruction::Assert(Artifact {
             the: "member/role".parse()?,
             of: of.clone(),
             is: Value::String("editor".into()),
             cause: None,
+            meta: None,
         }),
         Instruction::Assert(Artifact {
             the: "member/joined".parse()?,
             of,
             is: Value::String("2026-09-01".into()),
             cause: None,
+            meta: None,
         }),
     ])
 }

@@ -655,6 +655,7 @@ mod tests {
             of: Entity::from_str("did:key:z6MkExample").unwrap(),
             is: value,
             cause: None,
+            meta: None,
         }
     }
 

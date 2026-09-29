@@ -348,6 +348,7 @@ mod tests {
             of: "user:1".parse()?,
             is: Value::String("Alice".into()),
             cause: None,
+            meta: None,
         })]))
         .perform(&operator)
         .await?;
@@ -369,6 +370,7 @@ mod tests {
             of: "user:123".parse()?,
             is: Value::String("Alice".to_string()),
             cause: None,
+            meta: None,
         };
         let _hash = branch
             .commit(stream::iter(vec![Instruction::Assert(artifact)]))
@@ -479,18 +481,21 @@ mod tests {
                 of: "user:1".parse()?,
                 is: Value::String("Alice".into()),
                 cause: None,
+                meta: None,
             }),
             Instruction::Assert(Artifact {
                 the: "user/email".parse()?,
                 of: "user:1".parse()?,
                 is: Value::String("alice@example.com".into()),
                 cause: None,
+                meta: None,
             }),
             Instruction::Assert(Artifact {
                 the: "user/name".parse()?,
                 of: "user:2".parse()?,
                 is: Value::String("Bob".into()),
                 cause: None,
+                meta: None,
             }),
         ];
 
@@ -537,18 +542,21 @@ mod tests {
                 of: "user:alice".parse()?,
                 is: Value::String("Alice".into()),
                 cause: None,
+                meta: None,
             }),
             Instruction::Assert(Artifact {
                 the: "user/name".parse()?,
                 of: "user:bob".parse()?,
                 is: Value::String("Bob".into()),
                 cause: None,
+                meta: None,
             }),
             Instruction::Assert(Artifact {
                 the: "user/email".parse()?,
                 of: "user:alice".parse()?,
                 is: Value::String("alice@example.com".into()),
                 cause: None,
+                meta: None,
             }),
         ];
 
@@ -608,6 +616,7 @@ mod tests {
             of: "user:1".parse()?,
             is: Value::String("Alice".into()),
             cause: None,
+            meta: None,
         };
 
         branch

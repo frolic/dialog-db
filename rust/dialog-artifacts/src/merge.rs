@@ -834,6 +834,7 @@ mod screen_tests {
                     of: Entity::new()?,
                     is: Value::String(format!("label {index}")),
                     cause: None,
+                    meta: None,
                 })
             })
             .collect::<Result<_>>()?;

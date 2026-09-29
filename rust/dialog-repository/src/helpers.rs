@@ -113,6 +113,7 @@ where
                     of: format!("device:{round}-{i}").parse().expect("valid entity"),
                     is: Value::String(format!("device-{round}-{i}").repeat(24)),
                     cause: None,
+                    meta: None,
                 })
             })
             .collect();

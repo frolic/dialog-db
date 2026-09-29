@@ -119,6 +119,7 @@ fn note(of: &str, body: &str) -> Result<Instruction> {
         of: of.parse()?,
         is: Value::String(body.into()),
         cause: None,
+        meta: None,
     }))
 }
 

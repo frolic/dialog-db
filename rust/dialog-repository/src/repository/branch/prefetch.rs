@@ -195,6 +195,7 @@ mod tests {
             of: entity.parse()?,
             is: Value::String(body),
             cause: None,
+            meta: None,
         }))
     }
 

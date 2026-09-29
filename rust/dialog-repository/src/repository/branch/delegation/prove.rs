@@ -864,6 +864,7 @@ mod tests {
                 of: entity.clone(),
                 is: Value::String(value.to_string()),
                 cause: None,
+                meta: None,
             }))
         };
         let command = Command(vec!["storage".to_string()]).to_string();

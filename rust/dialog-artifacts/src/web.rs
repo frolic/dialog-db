@@ -641,7 +641,13 @@ impl TryFrom<JsValue> for Artifact {
             })
             .map_err(js_value_to_error)?;
 
-        Ok(Artifact { the, of, is, cause })
+        Ok(Artifact {
+            meta: None,
+            the,
+            of,
+            is,
+            cause,
+        })
     }
 }
 

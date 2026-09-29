@@ -93,6 +93,7 @@ fn instructions(facts: Vec<Fact>) -> Result<Vec<Instruction>> {
                 of: entity.parse()?,
                 is: value,
                 cause: None,
+                meta: None,
             }))
         })
         .collect()

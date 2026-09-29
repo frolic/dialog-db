@@ -649,6 +649,7 @@ mod tests {
             of: entity.parse().unwrap(),
             is: Value::String(value.to_string()),
             cause: None,
+            meta: None,
         })
     }
 
@@ -658,6 +659,7 @@ mod tests {
             of: entity.parse().unwrap(),
             is: Value::String(value.to_string()),
             cause: None,
+            meta: None,
         })
     }
 
@@ -667,6 +669,7 @@ mod tests {
             of: entity.parse().unwrap(),
             is: Value::String(value.to_string()),
             cause: None,
+            meta: None,
         })
     }
 
@@ -760,6 +763,7 @@ mod tests {
                 of: format!("rev:{i}").parse().unwrap(),
                 is: Value::String(format!("{i}")),
                 cause: None,
+                meta: None,
             };
             let entity_key = crate::EntityKey::from_artifact(&artifact, &default_manifest());
             let attribute_key = crate::AttributeKey::from_key(&entity_key);
@@ -959,6 +963,7 @@ mod tests {
                 of: "rev:1".parse().unwrap(),
                 is: Value::String("record".to_string()),
                 cause: None,
+                meta: None,
             };
             let entity_key = EntityKey::from_artifact(&artifact, &default_manifest());
             let attribute_key = AttributeKey::from_key(&entity_key);

@@ -601,6 +601,7 @@ mod tests {
             of: Entity::new().expect("entity mints"),
             is: ArtifactValue::String(name.into()),
             cause: None,
+            meta: None,
         };
         EntityKey::from_artifact(&fact, &Manifest::default())
             .into_key()
@@ -709,6 +710,8 @@ mod tests {
             collapsed: Vec::new(),
             supersedes: Vec::new(),
             retraction: false,
+            meta: None,
+            collapsed_meta: Vec::new(),
         };
         let entries = vec![Entry {
             key,

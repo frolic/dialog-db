@@ -70,6 +70,14 @@ pub struct Datum {
     /// value rather than asserting it. Always `false` on index data.
     #[serde(default)]
     pub retraction: bool,
+    /// The [`Artifact::meta`] of the primary claim: the claim at
+    /// [`Datum::version`], or the only claim of unversioned data.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub meta: Option<Vec<u8>>,
+    /// The metadata of each collapsed claim, in the order of
+    /// [`Datum::collapsed`]. Empty when no collapsed claim carries any.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub collapsed_meta: Vec<Option<Vec<u8>>>,
 }
 
 impl Datum {
@@ -84,7 +92,56 @@ impl Datum {
             collapsed: Vec::new(),
             supersedes: Vec::new(),
             retraction: false,
+            meta: artifact.meta.clone(),
+            collapsed_meta: Vec::new(),
         }
+    }
+
+    /// Each claim this entry stands for, with its metadata, in version
+    /// order. Empty for unversioned data.
+    fn claims(&self) -> Vec<(Version, Option<Vec<u8>>)> {
+        let mut claims = Vec::new();
+        if let Some(version) = self.version {
+            claims.push((version, self.meta.clone()));
+        }
+        for (index, version) in self.collapsed.iter().enumerate() {
+            let meta = self.collapsed_meta.get(index).cloned().flatten();
+            claims.push((*version, meta));
+        }
+        claims
+    }
+
+    /// Stands this entry on `claims` in canonical form: sorted by version,
+    /// one claim per version, the smallest primary. Two copies of one claim
+    /// keep the smaller metadata, so every replica writes the same bytes.
+    fn set_claims(&mut self, mut claims: Vec<(Version, Option<Vec<u8>>)>) {
+        claims.sort();
+        claims.dedup_by(|later, earlier| later.0 == earlier.0);
+        let mut claims = claims.into_iter();
+        if let Some((version, meta)) = claims.next() {
+            self.version = Some(version);
+            self.meta = meta;
+        }
+        let (collapsed, collapsed_meta): (Vec<_>, Vec<_>) = claims.unzip();
+        self.collapsed = collapsed;
+        self.collapsed_meta = if collapsed_meta.iter().all(Option::is_none) {
+            Vec::new()
+        } else {
+            collapsed_meta
+        };
+    }
+
+    /// Fold `other`'s claims, with their metadata, into this entry. The two
+    /// entries stand at the same key, so they assert the same fact. The
+    /// result is canonical, as [`absorb_versions`](Datum::absorb_versions)
+    /// describes.
+    pub fn absorb(&mut self, other: &Datum) {
+        if self.version.is_none() && other.version.is_none() {
+            return;
+        }
+        let mut claims = self.claims();
+        claims.extend(other.claims());
+        self.set_claims(claims);
     }
 
     /// Every claim version this entry stands for: the primary
@@ -109,13 +166,9 @@ impl Datum {
     /// the trees never converge). [`retire_covered`](Datum::retire_covered)
     /// re-canonicalizes the same way.
     pub fn absorb_versions<'a>(&mut self, versions: impl IntoIterator<Item = &'a Version>) {
-        let mut all: Vec<Version> = self.versions().copied().collect();
-        all.extend(versions.into_iter().copied());
-        all.sort();
-        all.dedup();
-        let mut all = all.into_iter();
-        self.version = all.next().or(self.version);
-        self.collapsed = all.collect();
+        let mut claims = self.claims();
+        claims.extend(versions.into_iter().map(|version| (*version, None)));
+        self.set_claims(claims);
     }
 
     /// Retire the claims `covered` names from this entry: `None` when every
@@ -125,25 +178,25 @@ impl Datum {
     /// surviving version primary, rest collapsed, sorted) so both replicas
     /// of a partial retirement produce identical bytes.
     pub fn retire_covered(&self, covered: &[Version]) -> Option<Datum> {
-        let mut survivors: Vec<Version> = self
-            .versions()
-            .filter(|version| !covered.contains(version))
-            .copied()
-            .collect();
         if self.version.is_none() {
             // An unversioned entry cannot be covered by version.
             return Some(self.clone());
         }
-        survivors.sort();
-        survivors.dedup();
-        let mut survivors = survivors.into_iter();
-        let primary = survivors.next()?;
-        Some(Datum {
-            version: Some(primary),
-            collapsed: survivors.collect(),
-            ..self.clone()
-        })
+        let survivors: Vec<_> = self
+            .claims()
+            .into_iter()
+            .filter(|(version, _)| !covered.contains(version))
+            .collect();
+        if survivors.is_empty() {
+            return None;
+        }
+        let mut datum = self.clone();
+        datum.set_claims(survivors);
+        Some(datum)
     }
 }
 
 impl ValueType for Datum {}
+
+#[cfg(test)]
+mod tests;

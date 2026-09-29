@@ -105,6 +105,7 @@ mod tests {
                 of: "user:main".parse()?,
                 is: Value::String("Main data".to_string()),
                 cause: None,
+                meta: None,
             })]))
             .perform(&operator)
             .await?;
@@ -133,6 +134,7 @@ mod tests {
                 of: "user:main".parse()?,
                 is: Value::String("Main data".to_string()),
                 cause: None,
+                meta: None,
             })]))
             .perform(&operator)
             .await?;

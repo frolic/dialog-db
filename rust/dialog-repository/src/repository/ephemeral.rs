@@ -467,6 +467,7 @@ mod tests {
             of: of.parse().expect("entity"),
             is: Value::String(is.into()),
             cause: None,
+            meta: None,
         }
     }
 

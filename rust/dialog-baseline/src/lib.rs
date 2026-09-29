@@ -277,12 +277,14 @@ impl DialogFacts {
                 of: entity.clone(),
                 is: Value::String(row.name.clone()),
                 cause: None,
+                meta: None,
             },
             Artifact {
                 the: Attribute::from_str(ROLE_ATTRIBUTE)?,
                 of: entity,
                 is: Value::String(row.role.clone()),
                 cause: None,
+                meta: None,
             },
         ])
     }
