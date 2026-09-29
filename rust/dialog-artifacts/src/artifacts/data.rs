@@ -15,6 +15,8 @@
 //! (plus the fetched spilled block, if any) by
 //! [`Artifact::from_key_datum`]/[`Artifact::from_key_datum_with_value`].
 
+use std::slice;
+
 use rkyv::Archive;
 use serde::{Deserialize, Serialize};
 
@@ -81,7 +83,7 @@ impl Datum {
     pub fn for_artifact(artifact: &Artifact) -> Self {
         Self {
             cause: artifact.cause.clone(),
-            blob: encode_claim_meta(std::slice::from_ref(&artifact.meta)),
+            blob: encode_claim_meta(slice::from_ref(&artifact.meta)),
             version: None,
             collapsed: Vec::new(),
             supersedes: Vec::new(),
