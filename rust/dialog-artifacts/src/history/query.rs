@@ -12,11 +12,30 @@ use crate::tree::{
     ArtifactNodeCache, ArtifactTree, SPILL_LOOKAHEAD, SpillCache, fetch_spilled_cached, spill_cache,
 };
 use crate::{
-    Attribute, DialogArtifactsError, Entity, Key, State, history_claim_range, history_key_version,
-    history_region_range, history_version_range,
+    Attribute, DialogArtifactsError, ENTITY_KEY_TAG, Entity, Key, State, history_claim_range,
+    history_key_version, history_region_range, history_version_range,
 };
 
-use super::{Claim, History, REVISION_ATTRIBUTE, Record, RevisionRecord, Version};
+use super::{
+    Claim, Context, Edition, History, Origin, REVISION_ATTRIBUTE, Record, RevisionRecord, Version,
+};
+
+/// The key ranges that a reader of one revision reads first, each as
+/// inclusive bounds: the entity-ordered entry of each fact the revision
+/// wrote.
+///
+/// Attribute-ordered and value-ordered reads of the facts are not in it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RevisionReads {
+    /// The revision.
+    pub version: Version,
+    /// The key ranges, inclusive at both ends.
+    pub ranges: Vec<(Key, Key)>,
+}
+
+/// The bytes of the version after the tag of a history key: the origin
+/// and the edition.
+const VERSION_BYTES: usize = super::VERSION_LENGTH;
 
 /// Which history records a [`TreeHistory::select`] scan covers.
 ///
@@ -205,6 +224,81 @@ where
     #[deprecated(note = "use `select(HistorySelector::All)`")]
     pub async fn records(&self) -> Result<Vec<(Version, Record)>, DialogArtifactsError> {
         self.select(HistorySelector::All).try_collect().await
+    }
+}
+
+impl<S> TreeHistory<S>
+where
+    S: ArchiveReader + Clone,
+{
+    /// The reads of the newest revisions in `context`, newest first: for
+    /// each origin, the revisions in the last `editions` editions up to its
+    /// watermark. A writer that names the tree nodes of these reads in its
+    /// head lets a reader show the newest facts with no second round trip.
+    ///
+    /// Editions order revisions across origins, because an edition is one
+    /// more than every edition its revision builds on.
+    pub async fn newest_reads(
+        &self,
+        context: &Context,
+        editions: u64,
+    ) -> Result<Vec<RevisionReads>, DialogArtifactsError> {
+        let mut reads = Vec::new();
+        for (origin, watermark) in context.iter() {
+            let top = watermark.edition.value();
+            let floor = top.saturating_sub(editions.saturating_sub(1));
+            reads.extend(self.reads_between(*origin, floor, top).await?);
+        }
+        reads.sort_by(|left, right| {
+            right
+                .version
+                .edition
+                .cmp(&left.version.edition)
+                .then(left.version.origin.cmp(&right.version.origin))
+        });
+        Ok(reads)
+    }
+
+    /// The reads of the revisions of `origin` from edition `floor` to
+    /// edition `top`, both included, in edition order.
+    async fn reads_between(
+        &self,
+        origin: Origin,
+        floor: u64,
+        top: u64,
+    ) -> Result<Vec<RevisionReads>, DialogArtifactsError> {
+        let mut reads = Vec::new();
+        if floor > top {
+            return Ok(reads);
+        }
+        let (min, _) = history_version_range(&Version::new(origin, Edition::new(floor)));
+        let (_, max) = history_version_range(&Version::new(origin, Edition::new(top)));
+        let stream = self
+            .tree
+            .stream_range((Bound::Included(min), Bound::Excluded(max)), &self.storage);
+        tokio::pin!(stream);
+        let mut current: Option<RevisionReads> = None;
+        while let Some(entry) = stream.try_next().await? {
+            let version = history_key_version(&entry.key)?;
+            if current.as_ref().map(|reads| reads.version) != Some(version) {
+                reads.extend(current.take());
+                current = Some(RevisionReads {
+                    version,
+                    ranges: Vec::new(),
+                });
+            }
+            // A history key is the tag and the version, then the same bytes
+            // as the fact's entity-ordered key after its tag.
+            let bytes: &[u8] = entry.key.as_ref();
+            let mut entity_key = vec![ENTITY_KEY_TAG];
+            entity_key.extend_from_slice(bytes.get(1 + VERSION_BYTES..).unwrap_or_default());
+            let entity_key = Key::from(entity_key);
+            if let Some(current) = current.as_mut() {
+                current.ranges.push((entity_key.clone(), entity_key));
+            }
+        }
+        reads.extend(current);
+        Ok(reads)
     }
 }
 

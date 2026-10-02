@@ -23,8 +23,8 @@ use crate::repository::archive::local::read_all;
 use crate::repository::archive::networked::fill_import;
 use crate::repository::remote::Step;
 use crate::{
-    Branch, ConnectedReplica, Index, LocalIndex, PublishError, PushError, RemoteSite,
-    RepositoryMemoryExt, Revision, Upstream, UpstreamBranch,
+    Branch, ConnectedReplica, Index, LocalIndex, NetworkedIndex, PublishError, PushError,
+    RemoteSite, RepositoryMemoryExt, Revision, Upstream, UpstreamBranch, name_prefetch,
 };
 use futures_util::future::join_all;
 
@@ -508,7 +508,14 @@ where
                     pending = rest;
                 }
 
-                upstream.publish(revision.clone()).perform(env).await?;
+                // The head names the nodes of the newest revisions, so a
+                // reader that holds none of the tree reads them in one
+                // round trip. A partial replica may not hold the history
+                // of every newest revision, so a miss reads from the target.
+                let mut published = revision.clone();
+                let named_from = NetworkedIndex::new(env, index.clone(), remote.clone());
+                published.prefetch = name_prefetch(&revision, named_from).await?;
+                upstream.publish(published).perform(env).await?;
             }
         }
 

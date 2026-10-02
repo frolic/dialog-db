@@ -10,12 +10,13 @@ use dialog_common::ConditionalSync;
 use dialog_effects::archive::{Get, Put};
 use dialog_effects::blob::Read as BlobRead;
 use dialog_effects::memory::Resolve;
-use dialog_search_tree::{DialogSearchTreeError, LoadBlock, Manifest, PersistentNode};
+use dialog_search_tree::{DialogSearchTreeError, Manifest, PersistentNode};
 use dialog_storage::Blake3Hash;
 use futures_util::Stream;
 
 use dialog_effects::archive::prelude::{ArchiveScope, CatalogScope};
 
+use super::prefetch::load_root;
 use crate::repository::source::SourceRef;
 use crate::{Branch, Index, NetworkedIndex, RemoteSite};
 
@@ -149,30 +150,41 @@ impl Select<'_> {
         // makes the first select warm the cache and the rest hit it, while
         // still fetching (and, through `NetworkedIndex`, replicating) on a
         // genuine miss and failing fast when the root is truly absent.
+        //
+        // A root that is not cached yet is read together with the nodes
+        // its head names, all at once (see [`load_root`]). A cold reader
+        // then reads the top of the tree and the newest facts in one round
+        // trip, not one per level.
         let node_cache = self.source.node_cache();
-        Ok(match self.tree_hash() {
-            Some(tree_hash) => {
-                node_cache
-                    .get_or_fetch(&NodeHash::from(tree_hash), async |hash| {
-                        LoadBlock::new(hash.clone())
-                            .perform(store)
-                            .await?
-                            .map(PersistentNode::try_from)
-                            .transpose()
-                    })
-                    .await?
-                    .ok_or_else(|| {
-                        DialogSearchTreeError::Node(format!(
-                            "Block not found in storage: {}",
-                            tree_hash.to_base58(),
-                        ))
-                    })?;
-                Index::from_hash_with_cache(NodeHash::from(tree_hash), node_cache)
-            }
-            // No revision means no tree to probe or scan: the select runs
-            // over the empty index and yields nothing.
-            None => Index::empty_with_cache(node_cache),
-        })
+        let revision = self.source.revision();
+        let named = revision
+            .as_ref()
+            .map(|revision| revision.prefetch.as_slice())
+            .unwrap_or_default();
+        Ok(
+            match revision.as_ref().map(|revision| *revision.tree.hash()) {
+                Some(tree_hash) => {
+                    node_cache
+                        .get_or_fetch(&NodeHash::from(tree_hash), async |hash| {
+                            load_root(store, hash, named)
+                                .await?
+                                .map(PersistentNode::try_from)
+                                .transpose()
+                        })
+                        .await?
+                        .ok_or_else(|| {
+                            DialogSearchTreeError::Node(format!(
+                                "Block not found in storage: {}",
+                                tree_hash.to_base58(),
+                            ))
+                        })?;
+                    Index::from_hash_with_cache(NodeHash::from(tree_hash), node_cache)
+                }
+                // No revision means no tree to probe or scan: the select runs
+                // over the empty index and yields nothing.
+                None => Index::empty_with_cache(node_cache),
+            },
+        )
     }
 
     /// Execute the select against the given content-addressed store.

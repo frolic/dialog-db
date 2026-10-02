@@ -69,6 +69,10 @@ mod open;
 pub use open::*;
 
 mod merge;
+
+mod prefetch;
+pub use prefetch::*;
+
 mod pull;
 pub use pull::*;
 

@@ -75,7 +75,7 @@ impl From<TreeReference> for TreeHash {
 /// boundaries. Paired with the [`Origin`] derived from `(issuer, subject)`,
 /// it forms a globally unique [`Version`]: two revisions with the same
 /// edition but different origins are concurrent by inspection.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Revision {
     /// The content-derived identifier of the branch this revision was
     /// minted on: the repository schema's branch entity URI, folding the
@@ -133,7 +133,36 @@ pub struct Revision {
     /// root is only final at publish time) — see [`Revision::verify`].
     #[serde(default, with = "serde_bytes")]
     pub signature: Vec<u8>,
+
+    /// The nodes below the tree root that a reader holding none of the
+    /// tree reads first, named by the writer when it publishes the head.
+    /// A reader fetches them together with the root, so the top of the
+    /// tree and the newest facts cost one round trip, not one per level.
+    ///
+    /// A hint, outside the signed payload: each block is checked against
+    /// its name when it arrives, and a reader reads a block only through
+    /// a link it opened from the signed root. A wrong name costs only
+    /// the bytes of a block that is never used. Empty on heads that name
+    /// nothing.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prefetch: Vec<TreeHash>,
 }
+
+/// Two heads are equal when they state the same signed revision. The
+/// nodes a head names ([`Revision::prefetch`]) are a hint outside the
+/// signature, so they do not count.
+impl PartialEq for Revision {
+    fn eq(&self, other: &Self) -> bool {
+        self.branch == other.branch
+            && self.issuer == other.issuer
+            && self.tree == other.tree
+            && self.edition == other.edition
+            && self.context == other.context
+            && self.signature == other.signature
+    }
+}
+
+impl Eq for Revision {}
 
 impl Revision {
     /// Build the first revision of a branch, with no causal ancestor and
@@ -146,6 +175,7 @@ impl Revision {
             edition: Edition::GENESIS,
             context: None,
             signature: Vec::new(),
+            prefetch: Vec::new(),
         }
     }
 
@@ -170,6 +200,7 @@ impl Revision {
             edition: self.edition.successor(),
             context: None,
             signature: Vec::new(),
+            prefetch: Vec::new(),
         }
     }
 
@@ -196,6 +227,7 @@ impl Revision {
             edition: self.edition.max(upstream.edition).successor(),
             context: None,
             signature: Vec::new(),
+            prefetch: Vec::new(),
         }
     }
 
@@ -380,6 +412,22 @@ mod tests {
         decoded
             .verify()
             .expect("the decoded head still carries a valid signature");
+    }
+
+    /// The nodes a head names travel with it on the wire, and they are a
+    /// hint outside the signature: a head that names nodes still verifies
+    /// and equals the same head without them.
+    #[test]
+    fn it_carries_named_nodes_outside_the_signature() {
+        let head = signed_head(&key(1), |_| {});
+        let mut named = head.clone();
+        named.prefetch = vec![[1; 32], [2; 32]];
+        named.verify().expect("named nodes are not signed");
+        assert_eq!(named, head);
+
+        let bytes = serde_ipld_dagcbor::to_vec(&named).expect("head encodes");
+        let decoded: Revision = serde_ipld_dagcbor::from_slice(&bytes).expect("head decodes");
+        assert_eq!(decoded.prefetch, named.prefetch);
     }
 
     /// A validly SIGNED head whose edition sits at the protocol ceiling is

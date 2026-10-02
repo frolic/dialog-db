@@ -2527,6 +2527,7 @@ mod history_tests {
             edition: Edition::GENESIS,
             context: None,
             signature: Vec::new(),
+            prefetch: Vec::new(),
         };
         evil.reset(forged).perform(&operator).await?;
 
