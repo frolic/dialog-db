@@ -154,6 +154,7 @@ impl RevisionRecord {
             of: version.entity(),
             is: Value::Record(self.to_bytes()?),
             cause: None,
+            meta: None,
         })
     }
 

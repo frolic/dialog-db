@@ -151,6 +151,7 @@ fn field(entity: &Entity, attribute: &str, value: Value) -> Result<Artifact, Dia
         of: entity.clone(),
         is: value,
         cause: None,
+        meta: None,
     })
 }
 
@@ -495,6 +496,7 @@ mod tests {
                         .expect("a valid entity"),
                     is: Value::UnsignedInt(fact),
                     cause: None,
+                    meta: None,
                 })
             });
             branch
@@ -807,6 +809,7 @@ mod tests {
                 of: "user:mallory".parse()?,
                 is: Value::String("did:key:zForged".to_string()),
                 cause: None,
+                meta: None,
             })]))
             .perform(&operator)
             .await;

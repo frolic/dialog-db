@@ -992,6 +992,7 @@ mod tests {
                 of: "user:elsewhere".parse()?,
                 is: Value::String("Elsewhere".into()),
                 cause: None,
+                meta: None,
             })]))
             .perform(&operator)
             .await?;

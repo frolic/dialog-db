@@ -334,18 +334,21 @@ impl Changes {
                             of: entity.clone(),
                             is: value,
                             cause: None,
+                            meta: None,
                         }),
                         Change::Replace(value) => Instruction::Replace(Artifact {
                             the: attribute.clone(),
                             of: entity.clone(),
                             is: value,
                             cause: None,
+                            meta: None,
                         }),
                         Change::Retract(value) => Instruction::Retract(Artifact {
                             the: attribute.clone(),
                             of: entity.clone(),
                             is: value,
                             cause: None,
+                            meta: None,
                         }),
                     };
                     instructions.push(instruction);
@@ -633,6 +636,7 @@ impl Changes {
                         of: entity.clone(),
                         is: value.clone(),
                         cause: None,
+                        meta: None,
                     });
                 }
             }
@@ -838,6 +842,7 @@ mod tests {
             of: alice(),
             is,
             cause: None,
+            meta: None,
         })
         .collect();
 

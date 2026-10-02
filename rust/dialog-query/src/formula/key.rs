@@ -122,6 +122,7 @@ mod tests {
             of: Entity::new().expect("entity mints"),
             is: Value::String("Alice".into()),
             cause: None,
+            meta: None,
         }
     }
 

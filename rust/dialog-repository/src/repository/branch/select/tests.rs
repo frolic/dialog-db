@@ -43,6 +43,7 @@ fn fact(the: &str, of: Entity, is: Value) -> Result<Artifact> {
         of,
         is,
         cause: None,
+        meta: None,
     })
 }
 

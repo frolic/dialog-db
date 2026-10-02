@@ -599,6 +599,7 @@ mod tests {
             of: Entity::new().expect("entity mints"),
             is: ArtifactValue::String(name.into()),
             cause: None,
+            meta: None,
         };
         EntityKey::from_artifact(&fact, &Manifest::default())
             .into_key()

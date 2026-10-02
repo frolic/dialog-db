@@ -34,6 +34,7 @@ fn assert_fact(entity: usize, value: &str) -> Instruction {
         of: format!("user:{entity}").parse().unwrap(),
         is: Value::String(value.to_string()),
         cause: None,
+        meta: None,
     })
 }
 

@@ -257,6 +257,7 @@ mod tests {
             of: of.parse()?,
             is: Value::String(is.to_string()),
             cause: None,
+            meta: None,
         }))
     }
 

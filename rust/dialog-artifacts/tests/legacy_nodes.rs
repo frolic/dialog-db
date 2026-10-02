@@ -35,6 +35,7 @@ fn expected(n: u32) -> Artifact {
             Value::String(format!("value {n}"))
         },
         cause: None,
+        meta: None,
     }
 }
 

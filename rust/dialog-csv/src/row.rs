@@ -105,6 +105,12 @@ impl TryFrom<CsvRow> for Artifact {
             })
             .transpose()?;
 
-        Ok(Artifact { the, of, is, cause })
+        Ok(Artifact {
+            meta: None,
+            the,
+            of,
+            is,
+            cause,
+        })
     }
 }

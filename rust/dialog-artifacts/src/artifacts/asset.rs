@@ -96,6 +96,7 @@ impl Asset {
             of: self.entity()?,
             is: Value::UnsignedInt(self.size as u128),
             cause: None,
+            meta: None,
         })
     }
 }

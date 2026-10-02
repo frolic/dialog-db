@@ -257,6 +257,7 @@ mod tests {
                     of: "doc:1".parse().unwrap(),
                     is: value.clone(),
                     cause: None,
+                    meta: None,
                 })]),
             )
             .await?;
@@ -285,6 +286,7 @@ mod tests {
             of: "doc:1".parse().unwrap(),
             is: Value::String("z".repeat(inline_n + 1)),
             cause: None,
+            meta: None,
         };
 
         let store = MemoryBlocks::new();
@@ -340,6 +342,7 @@ mod tests {
             of: "doc:1".parse().unwrap(),
             is: Value::String("z".repeat(inline_n + 1)),
             cause: None,
+            meta: None,
         };
         let reference = artifact.is.to_reference();
 
@@ -399,6 +402,7 @@ mod tests {
             of: "user:1".parse().unwrap(),
             is: Value::String("Alice".to_string()),
             cause: None,
+            meta: None,
         };
 
         let store = MemoryBlocks::new();
@@ -450,6 +454,7 @@ mod tests {
                     of: "user:1".parse().unwrap(),
                     is: Value::String("Alice".to_string()),
                     cause: None,
+                    meta: None,
                 })]),
             )
             .await?;

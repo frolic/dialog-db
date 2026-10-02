@@ -822,6 +822,7 @@ mod tests {
                 of: alice.parse()?,
                 is: Value::String("Alice".to_string()),
                 cause: None,
+                meta: None,
             })]))
             .perform(&operator)
             .await?;
@@ -832,6 +833,7 @@ mod tests {
                 of: bob.parse()?,
                 is: Value::String("Bob".to_string()),
                 cause: None,
+                meta: None,
             })]))
             .perform(&operator)
             .await?;
@@ -850,6 +852,54 @@ mod tests {
         Ok(())
     }
 
+    /// A fact's metadata is stored with it and read back with it, and a
+    /// retraction that names the fact without the metadata removes it.
+    #[dialog_common::test]
+    async fn it_reads_a_facts_metadata_back() -> Result<()> {
+        let (operator, profile) = test_session_with_peer().await;
+        let repo = test_repo(&operator, &profile).await;
+        let branch = repo.branch("main").open().perform(&operator).await?;
+        let fact = Artifact {
+            the: "post/text".parse()?,
+            of: "post:1".parse()?,
+            is: Value::String("hello".to_string()),
+            cause: None,
+            meta: Some(b"by alice at noon".to_vec()),
+        };
+
+        branch
+            .commit(stream::iter(vec![Instruction::Assert(fact.clone())]))
+            .perform(&operator)
+            .await?;
+        let read = |the: &'static str| {
+            let branch = branch.clone();
+            let operator = &operator;
+            async move {
+                let rows: Vec<Artifact> = branch
+                    .claims()
+                    .select(ArtifactSelector::new().the(the.parse()?))
+                    .to_owned()
+                    .perform(operator)
+                    .await?
+                    .filter_map(|row| async { row.ok() })
+                    .collect()
+                    .await;
+                anyhow::Ok(rows)
+            }
+        };
+        assert_eq!(read("post/text").await?, vec![fact.clone()]);
+
+        branch
+            .commit(stream::iter(vec![Instruction::Retract(Artifact {
+                meta: None,
+                ..fact
+            })]))
+            .perform(&operator)
+            .await?;
+        assert_eq!(read("post/text").await?, Vec::new());
+        Ok(())
+    }
+
     #[dialog_common::test]
     async fn it_commits_and_selects() -> Result<()> {
         let (operator, profile) = test_session_with_peer().await;
@@ -861,6 +911,7 @@ mod tests {
             of: "user:123".parse()?,
             is: Value::String("Alice".to_string()),
             cause: None,
+            meta: None,
         };
 
         let instructions = stream::iter(vec![Instruction::Assert(artifact.clone())]);
@@ -922,6 +973,7 @@ mod tests {
                 of: "user:a".parse()?,
                 is: Value::String("Alice".to_string()),
                 cause: None,
+                meta: None,
             })]))
             .perform(&operator)
             .await?;
@@ -934,6 +986,7 @@ mod tests {
                 of: "user:b".parse()?,
                 is: Value::String("Bob".to_string()),
                 cause: None,
+                meta: None,
             })]))
             .perform(&operator)
             .await;
@@ -955,6 +1008,7 @@ mod tests {
                 of: "user:b".parse()?,
                 is: Value::String("Bob".to_string()),
                 cause: None,
+                meta: None,
             })]))
             .perform(&operator)
             .await?;
@@ -1002,6 +1056,7 @@ mod history_tests {
             of: of.parse().unwrap(),
             is: Value::String(value.to_string()),
             cause: None,
+            meta: None,
         }
     }
 
@@ -1155,6 +1210,7 @@ mod history_tests {
             of: "forged:revision".parse()?,
             is: Value::String("lies".to_string()),
             cause: None,
+            meta: None,
         };
         for instruction in [
             Instruction::Assert(forged.clone()),

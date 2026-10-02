@@ -2613,6 +2613,7 @@ mod tests {
                 of: doc.clone(),
                 is: Value::String("hello".into()),
                 cause: None,
+                meta: None,
             })]))
             .perform(&operator)
             .await?;
@@ -2696,6 +2697,7 @@ mod tests {
                 of: subject.clone(),
                 is: Value::String("p".into()),
                 cause: None,
+                meta: None,
             })]))
             .perform(&operator)
             .await?;
@@ -2752,6 +2754,7 @@ mod tests {
                 of: old.clone(),
                 is: Value::String("old".into()),
                 cause: None,
+                meta: None,
             })]))
             .perform(&operator)
             .await?;
@@ -2777,6 +2780,7 @@ mod tests {
                 of: fresh.clone(),
                 is: Value::String("new".into()),
                 cause: None,
+                meta: None,
             })]))
             .perform(&operator)
             .await?;

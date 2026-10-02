@@ -4569,6 +4569,7 @@ mod tests {
             of: alice.clone(),
             is: Value::String("x".repeat(default.inline_n as usize + 1)),
             cause: None,
+            meta: None,
         };
         let demand = super::Demand::new();
         demand.record(

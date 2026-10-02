@@ -100,7 +100,7 @@ impl TreeValue for State<Datum> {
     fn fuse(winner: Self, loser: &Self) -> Self {
         match (winner, loser) {
             (State::Added(mut winner), State::Added(loser)) => {
-                winner.absorb_versions(loser.versions());
+                winner.absorb(loser);
                 State::Added(winner)
             }
             (winner, _) => winner,
@@ -1448,7 +1448,7 @@ where
                     && let Some(State::Added(standing)) =
                         transient.read(&entity_key, storage).await?
                 {
-                    datum.absorb_versions(standing.versions());
+                    datum.absorb(&standing);
                 }
                 let added = State::Added(datum);
                 transient = transient
@@ -1722,6 +1722,7 @@ mod spill_cache_tests {
                 of: format!("doc:{index}").parse().unwrap(),
                 is: Value::String(format!("{index}:").repeat(inline_n + 1)),
                 cause: None,
+                meta: None,
             })
             .collect();
         let mut delta = ArchiveDelta::zero();
@@ -1810,6 +1811,7 @@ mod spill_cache_tests {
             of: "doc:1".parse().unwrap(),
             is: value.clone(),
             cause: None,
+            meta: None,
         };
         tree.apply(
             &store,
@@ -1872,6 +1874,7 @@ mod spill_cache_tests {
             of: "user:1".parse().unwrap(),
             is: Value::String("Alice".to_string()),
             cause: None,
+            meta: None,
         };
         tree.apply(
             &store,
@@ -2140,6 +2143,7 @@ mod corrupt_row_tests {
                     of: of.parse().expect("entity"),
                     is: Value::String(of.to_string()),
                     cause: None,
+                    meta: None,
                 })
             })
             .collect();

@@ -219,6 +219,7 @@ pub(crate) fn tombstones_from(changes: &Changes, manifest: &Manifest) -> HashSet
                 of: entity.clone(),
                 is: value.clone(),
                 cause: None,
+                meta: None,
             };
             tombstones.insert(sort_key(&artifact, manifest));
         }
@@ -364,6 +365,7 @@ mod tests {
             of: of.parse().expect("entity"),
             is: Value::String(is.into()),
             cause: None,
+            meta: None,
         }
     }
 

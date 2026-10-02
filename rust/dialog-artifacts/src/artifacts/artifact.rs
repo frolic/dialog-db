@@ -49,6 +49,11 @@ pub struct Artifact {
     /// The [`Cause`] of the [`Artifact`], which is a reference to an ancester
     /// version with a different [`Value`].
     pub cause: Option<Cause>,
+    /// Opaque bytes the writer carries with this claim, such as who wrote
+    /// it and when. dialog-db stores them beside the key and never reads
+    /// them, so they do not change what the fact is or how it sorts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub meta: Option<Vec<u8>>,
 }
 
 impl Debug for Artifact {
@@ -58,6 +63,7 @@ impl Debug for Artifact {
             .field("of", &self.of.to_string())
             .field("is", &self.is)
             .field("cause", &self.cause.as_ref().map(|cause| cause.to_string()))
+            .field("meta", &self.meta.as_ref().map(Vec::len))
             .finish()
     }
 }
@@ -173,6 +179,7 @@ impl Artifact {
             of,
             is: Value::String("<spilled value>".to_string()),
             cause: datum.cause.clone(),
+            meta: datum.primary_meta(),
         })
     }
 }
@@ -568,6 +575,7 @@ fn reconstruct(
         of,
         is,
         cause: datum.cause.clone(),
+        meta: datum.primary_meta(),
     })
 }
 

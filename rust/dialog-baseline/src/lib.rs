@@ -327,12 +327,14 @@ pub(crate) fn artifacts_for(row: &FactRow) -> Result<[Artifact; 2]> {
             of: entity.clone(),
             is: Value::String(row.name.clone()),
             cause: None,
+            meta: None,
         },
         Artifact {
             the: Attribute::from_str(ROLE_ATTRIBUTE)?,
             of: entity,
             is: Value::String(row.role.clone()),
             cause: None,
+            meta: None,
         },
     ])
 }

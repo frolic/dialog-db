@@ -537,6 +537,7 @@ async fn it_records_history_in_the_artifact_tree() -> Result<()> {
         of: entity.clone(),
         is: Value::String(value.into()),
         cause: None,
+        meta: None,
     };
 
     let first = Version::new(Origin::from([7u8; 32]), Edition::new(0));
@@ -628,6 +629,7 @@ async fn it_selects_the_records_of_one_revision() -> Result<()> {
         of: entity.clone(),
         is: Value::String(value.into()),
         cause: None,
+        meta: None,
     };
 
     let first = Version::new(Origin::from([7u8; 32]), Edition::new(0));
@@ -668,6 +670,7 @@ async fn it_selects_the_records_of_one_revision() -> Result<()> {
                 of: entity.clone(),
                 is: Value::String("hi".into()),
                 cause: None,
+                meta: None,
             }),
         ],
     )
@@ -755,6 +758,7 @@ async fn it_selects_records_whose_values_spilled() -> Result<()> {
             of: entity.clone(),
             is: Value::String(body.clone()),
             cause: None,
+            meta: None,
         })]),
     )
     .await?;
@@ -861,6 +865,7 @@ async fn it_fetches_spilled_history_values_concurrently() -> Result<()> {
             of: Entity::new()?,
             is: Value::String(body.clone()),
             cause: None,
+            meta: None,
         }));
     }
     tree.apply_versioned(&store, &mut delta, Some(version), stream::iter(claims))
@@ -1074,6 +1079,7 @@ async fn it_collapses_a_same_batch_assert_and_retract() -> Result<()> {
         of: entity.clone(),
         is: Value::String("Hej".into()),
         cause: None,
+        meta: None,
     };
     let version = Version::new(Origin::from([7u8; 32]), Edition::new(0));
 
@@ -1137,6 +1143,7 @@ async fn it_keeps_a_fact_retracted_and_re_asserted_in_one_batch() -> Result<()> 
         of: entity.clone(),
         is: Value::String("Hej".into()),
         cause: None,
+        meta: None,
     };
     let first = Version::new(Origin::from([7u8; 32]), Edition::new(0));
     let second = Version::new(Origin::from([7u8; 32]), Edition::new(1));
@@ -1216,6 +1223,7 @@ async fn it_reads_spilled_claim_values_back_through_history() -> Result<()> {
         of: entity.clone(),
         is: value,
         cause: None,
+        meta: None,
     };
     let first = Version::new(Origin::from([7u8; 32]), Edition::new(0));
     let second = Version::new(Origin::from([7u8; 32]), Edition::new(1));
@@ -1269,6 +1277,7 @@ async fn it_ignores_a_retraction_of_a_nonexistent_fact() -> Result<()> {
         of: entity.clone(),
         is: Value::String("Hej".into()),
         cause: None,
+        meta: None,
     };
     let version = Version::new(Origin::from([7u8; 32]), Edition::new(0));
 
@@ -1329,6 +1338,7 @@ async fn it_folds_same_batch_records_at_one_history_key() -> Result<()> {
         of: entity.clone(),
         is: Value::String("Hej".into()),
         cause: None,
+        meta: None,
     };
     let old = Version::new(Origin::from([7u8; 32]), Edition::new(0));
     let new = Version::new(Origin::from([7u8; 32]), Edition::new(1));
@@ -1422,6 +1432,7 @@ async fn it_covers_every_observed_claim_of_a_retracted_value() -> Result<()> {
         of: entity.clone(),
         is: Value::String("urgent".into()),
         cause: None,
+        meta: None,
     };
     // Two writers assert the IDENTICAL value; both claims are observed
     // here (both records enter the log), but the fact's index keys are
@@ -1492,6 +1503,7 @@ async fn it_unions_contended_claim_versions_in_either_direction() -> Result<()> 
         of: entity.clone(),
         is: Value::String("urgent".into()),
         cause: None,
+        meta: None,
     };
 
     let bob = Version::new(Origin::from([1u8; 32]), Edition::new(0));
@@ -1596,6 +1608,7 @@ async fn it_supersedes_only_different_values_when_replacing_many() -> Result<()>
         of: entity.clone(),
         is: Value::String(value.into()),
         cause: None,
+        meta: None,
     };
 
     let first = Version::new(Origin::from([7u8; 32]), Edition::new(0));
@@ -1691,6 +1704,7 @@ async fn it_disambiguates_truncated_history_keys_in_queries() -> Result<()> {
             of: of.clone(),
             is: Value::String(value.into()),
             cause: None,
+            meta: None,
         })
     };
 
@@ -2221,6 +2235,7 @@ async fn it_mirrors_covering_records_into_the_coverage_region() -> Result<()> {
         of: entity.clone(),
         is: Value::String(value.into()),
         cause: None,
+        meta: None,
     };
 
     let first = Version::new(Origin::from([7u8; 32]), Edition::new(0));

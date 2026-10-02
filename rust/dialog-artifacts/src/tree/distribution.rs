@@ -364,6 +364,7 @@ mod tests {
                 of: Entity::new()?,
                 is: Value::String(name.into()),
                 cause: None,
+                meta: None,
             })]),
         )
         .await?;

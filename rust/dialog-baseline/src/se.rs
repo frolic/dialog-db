@@ -356,6 +356,7 @@ pub fn se_instructions(commit: &[SeFact]) -> Result<Vec<Instruction>> {
             of: Entity::from_str(&fact.of)?,
             is: fact.value.to_dialog()?,
             cause: None,
+            meta: None,
         };
         instructions.push(if is_multi_valued(&fact.the) {
             Instruction::Assert(artifact)

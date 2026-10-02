@@ -1291,6 +1291,7 @@ mod tests {
             of: "user:123".parse()?,
             is: Value::String("Alice".to_string()),
             cause: None,
+            meta: None,
         };
         let _hash = feature
             .commit(stream::iter(vec![Instruction::Assert(artifact)]))
@@ -1335,12 +1336,14 @@ mod tests {
                     of: "doc:a".parse()?,
                     is: value.clone(),
                     cause: None,
+                    meta: None,
                 }),
                 Instruction::Assert(Artifact {
                     the: "doc/body".parse()?,
                     of: "doc:b".parse()?,
                     is: value.clone(),
                     cause: None,
+                    meta: None,
                 }),
             ]))
             .perform(&operator)
@@ -1401,6 +1404,7 @@ mod tests {
                 of: "user:123".parse()?,
                 is: Value::String("Alice".to_string()),
                 cause: None,
+                meta: None,
             })]))
             .perform(&operator)
             .await?;
@@ -1458,6 +1462,7 @@ mod tests {
                 of: "user:1".parse()?,
                 is: Value::String("Alice".to_string()),
                 cause: None,
+                meta: None,
             })]))
             .perform(&operator)
             .await?;
@@ -1522,6 +1527,7 @@ mod tests {
                 of: "user:123".parse()?,
                 is: Value::String("Alice".to_string()),
                 cause: None,
+                meta: None,
             })]))
             .perform(&operator)
             .await?;
@@ -1579,6 +1585,7 @@ mod tests {
                 of: "user:theirs".parse()?,
                 is: Value::String("Existing".to_string()),
                 cause: None,
+                meta: None,
             })]))
             .perform(&operator)
             .await?;
@@ -1590,6 +1597,7 @@ mod tests {
                 of: "user:ours".parse()?,
                 is: Value::String("New".to_string()),
                 cause: None,
+                meta: None,
             })]))
             .perform(&operator)
             .await?;
@@ -1615,6 +1623,7 @@ mod tests {
                 of: "user:main".parse()?,
                 is: Value::String("Main data".to_string()),
                 cause: None,
+                meta: None,
             })]))
             .perform(&operator)
             .await?;
@@ -1628,6 +1637,7 @@ mod tests {
                 of: "user:feature".parse()?,
                 is: Value::String("feature@example.com".to_string()),
                 cause: None,
+                meta: None,
             })]))
             .perform(&operator)
             .await?;
@@ -1702,6 +1712,7 @@ mod tests {
                 of: "user:1".parse()?,
                 is: Value::String("Alice".into()),
                 cause: None,
+                meta: None,
             })]))
             .perform(&operator)
             .await?;
@@ -1747,6 +1758,7 @@ mod tests {
                     of: format!("user:{value}").parse()?,
                     is: Value::String(value.into()),
                     cause: None,
+                    meta: None,
                 })]))
                 .perform(&operator)
                 .await?;

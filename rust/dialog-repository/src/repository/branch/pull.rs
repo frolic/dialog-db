@@ -1237,6 +1237,7 @@ mod tests {
             of: "user:seed".parse()?,
             is: Value::String("Seed".to_string()),
             cause: None,
+            meta: None,
         })]))
         .perform(&operator)
         .await?;
@@ -1260,6 +1261,7 @@ mod tests {
             of: "user:main".parse()?,
             is: Value::String("Main data".to_string()),
             cause: None,
+            meta: None,
         })]))
         .perform(&operator)
         .await?;
@@ -1295,6 +1297,7 @@ mod tests {
             of: "user:main".parse()?,
             is: Value::String("Main data".to_string()),
             cause: None,
+            meta: None,
         })]))
         .perform(&operator)
         .await?;
@@ -1305,6 +1308,7 @@ mod tests {
             of: "user:dev".parse()?,
             is: Value::String("dev@test.com".to_string()),
             cause: None,
+            meta: None,
         })]))
         .perform(&operator)
         .await?;
@@ -1373,6 +1377,7 @@ mod tests {
             of: "user:main".parse()?,
             is: Value::String("Main data".to_string()),
             cause: None,
+            meta: None,
         })]))
         .perform(&operator)
         .await?;
@@ -1386,6 +1391,7 @@ mod tests {
                 of: "user:feature".parse()?,
                 is: Value::String("feature@test.com".to_string()),
                 cause: None,
+                meta: None,
             })]))
             .perform(&operator)
             .await?;
@@ -1433,6 +1439,7 @@ mod tests {
             of: "user:main".parse()?,
             is: Value::String("Main data".to_string()),
             cause: None,
+            meta: None,
         })]))
         .perform(&operator)
         .await?;
@@ -1452,6 +1459,7 @@ mod tests {
                 of: "user:feature".parse()?,
                 is: Value::String("feature@test.com".to_string()),
                 cause: None,
+                meta: None,
             })]))
             .perform(&operator)
             .await?;
@@ -1523,6 +1531,7 @@ mod tests {
             of: "user:main".parse()?,
             is: Value::String("Main data".to_string()),
             cause: None,
+            meta: None,
         })]))
         .perform(&operator)
         .await?;
@@ -1565,6 +1574,7 @@ mod tests {
             of: "user:main".parse()?,
             is: Value::String("Main data".to_string()),
             cause: None,
+            meta: None,
         })]))
         .perform(&operator)
         .await?;
@@ -1629,6 +1639,7 @@ mod tests {
                     of: format!("user:{name}").parse()?,
                     is: Value::String(value.to_string()),
                     cause: None,
+                    meta: None,
                 })]))
                 .perform(&operator)
                 .await?;
@@ -1683,6 +1694,7 @@ mod tests {
             of: "user:main".parse()?,
             is: Value::String("Main data".to_string()),
             cause: None,
+            meta: None,
         })]))
         .perform(&operator)
         .await?;
@@ -1737,6 +1749,7 @@ mod tests {
                     of: format!("user:{name}").parse()?,
                     is: Value::String(name.to_string()),
                     cause: None,
+                    meta: None,
                 })]))
                 .perform(&operator)
                 .await?;
@@ -1842,6 +1855,7 @@ mod history_tests {
             of: of.parse().unwrap(),
             is: Value::String(value.to_string()),
             cause: None,
+            meta: None,
         })
     }
 
@@ -2022,6 +2036,7 @@ mod history_tests {
             of: "post:1".parse()?,
             is: Value::String("Hej".to_string()),
             cause: None,
+            meta: None,
         })]))
         .perform(&operator)
         .await?;
@@ -2112,6 +2127,7 @@ mod history_tests {
                 of: "post:1".parse()?,
                 is: Value::String("Hej".to_string()),
                 cause: None,
+                meta: None,
             })]))
             .perform(&operator)
             .await?;
@@ -2196,6 +2212,7 @@ mod history_tests {
                 of: "post:1".parse()?,
                 is: Value::String("Hi".to_string()),
                 cause: None,
+                meta: None,
             })]))
             .perform(&operator)
             .await?;
@@ -2361,6 +2378,7 @@ mod history_tests {
                 of: "post:1".parse()?,
                 is: Value::String("Hi".to_string()),
                 cause: None,
+                meta: None,
             })]))
             .perform(&operator)
             .await?;
@@ -2566,6 +2584,7 @@ mod history_tests {
                 of: "post:1".parse()?,
                 is: Value::String(value.to_string()),
                 cause: None,
+                meta: None,
             }))
         };
         main.commit(stream::iter(vec![replace("MainSide")?]))
@@ -2665,6 +2684,7 @@ mod history_tests {
                 of: "post:1".parse()?,
                 is: Value::String("Hej".to_string()),
                 cause: None,
+                meta: None,
             })]))
             .perform(&operator)
             .await?;
@@ -2736,6 +2756,7 @@ mod history_tests {
                 of: "task:7".parse().unwrap(),
                 is: Value::String(value.to_string()),
                 cause: None,
+                meta: None,
             })
         };
 
@@ -2761,6 +2782,7 @@ mod history_tests {
                 of: "task:7".parse()?,
                 is: Value::String("urgent".to_string()),
                 cause: None,
+                meta: None,
             })]))
             .perform(&operator)
             .await?;
@@ -2790,6 +2812,7 @@ mod history_tests {
                 of: "task:7".parse()?,
                 is: Value::String("urgent".to_string()),
                 cause: None,
+                meta: None,
             })]))
             .perform(&operator)
             .await?;
@@ -2840,6 +2863,7 @@ mod history_tests {
             of: "task:7".parse().unwrap(),
             is: Value::String("urgent".to_string()),
             cause: None,
+            meta: None,
         };
 
         // Bob labels the task; Alice and Mallory sync it.
@@ -2947,6 +2971,7 @@ mod history_tests {
                 of: "post:1".parse()?,
                 is: Value::String("Hej".to_string()),
                 cause: None,
+                meta: None,
             })]))
             .perform(&operator)
             .await?;
@@ -3017,6 +3042,7 @@ mod history_tests {
             of: "user:1".parse()?,
             is: Value::String("Bob".to_string()),
             cause: None,
+            meta: None,
         })]))
         .perform(&operator)
         .await?;
@@ -3373,6 +3399,7 @@ mod history_tests {
                 of: "post:1".parse()?,
                 is: Value::String("Spam".to_string()),
                 cause: None,
+                meta: None,
             })]))
             .perform(&operator)
             .await?;
@@ -3600,6 +3627,7 @@ mod history_tests {
             of: "post:1".parse()?,
             is: Value::String("Spam".to_string()),
             cause: None,
+            meta: None,
         })]))
         .perform(&operator)
         .await?;
@@ -3718,6 +3746,7 @@ mod history_tests {
             of: "post:1".parse()?,
             is: Value::String("Spam".to_string()),
             cause: None,
+            meta: None,
         })]))
         .perform(&operator)
         .await?;
@@ -3889,6 +3918,7 @@ mod history_tests {
                     of,
                     is,
                     cause: None,
+                    meta: None,
                 };
                 let instruction = match next(3) {
                     0 => Instruction::Assert(artifact),
@@ -4147,6 +4177,7 @@ mod history_tests {
             of: "task:bobs-victim".parse()?,
             is: Value::String("urgent".to_string()),
             cause: None,
+            meta: None,
         })]))
         .perform(&operator)
         .await?;
@@ -4155,6 +4186,7 @@ mod history_tests {
             of: "task:ours-victim".parse()?,
             is: Value::String("blocked".to_string()),
             cause: None,
+            meta: None,
         })]))
         .perform(&operator)
         .await?;
