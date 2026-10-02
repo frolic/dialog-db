@@ -155,6 +155,9 @@ pub use load::*;
 mod memory;
 pub use memory::*;
 
+mod top;
+pub use top::*;
+
 mod traversal;
 pub use traversal::*;
 

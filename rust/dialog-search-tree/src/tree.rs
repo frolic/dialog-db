@@ -431,9 +431,31 @@ where
         Env: Provider<LoadBlock> + ConditionalSync,
         R: RangeBounds<Key> + ConditionalSend,
     {
-        let accessor = Accessor::new(self.node_cache.clone(), storage);
+        self.stream_range_handles_reaching(range, storage, None)
+    }
 
-        TreeWalker::<Key, Value>::new(self.stored_root().cloned()).stream_handles(range, accessor)
+    /// [`stream_range_handles`](Self::stream_range_handles) for a caller
+    /// that reads at most `reach` entries: the scan reads ahead only as far
+    /// as that reaches (see [`TreeWalker::reach`]). A caller that stops
+    /// early then leaves the rest of the range unread.
+    pub fn stream_range_handles_reaching<R, Env>(
+        &self,
+        range: R,
+        storage: &Env,
+        reach: Option<u64>,
+    ) -> impl Stream<Item = Result<Entry<crate::KeyHandle, Value>, DialogSearchTreeError>>
+    + ConditionalSend
+    where
+        Env: Provider<LoadBlock> + ConditionalSync,
+        R: RangeBounds<Key> + ConditionalSend,
+    {
+        let accessor = Accessor::new(self.node_cache.clone(), storage);
+        let walker = TreeWalker::<Key, Value>::new(self.stored_root().cloned());
+        let walker = match reach {
+            Some(entries) => walker.reach(entries),
+            None => walker,
+        };
+        walker.stream_handles(range, accessor)
     }
 
     /// Returns a differential that produces changes to transform `self` into
