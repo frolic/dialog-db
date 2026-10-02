@@ -102,6 +102,9 @@ where
     /// Upper bound on the value: selected [`Artifact`]s' values must be
     /// `<=` (or `<`, when not inclusive) this.
     value_upper: Option<ValueBound>,
+    /// The most rows to select. A scan with a limit stops at it, and reads
+    /// ahead only the tree nodes that the limit can reach.
+    limit: Option<usize>,
     state_type: PhantomData<State>,
 }
 
@@ -127,6 +130,7 @@ struct SelectorIdentity<'a> {
     value_prefix: Option<&'a str>,
     value_lower: Option<(Vec<u8>, bool)>,
     value_upper: Option<(Vec<u8>, bool)>,
+    limit: Option<usize>,
 }
 
 impl<State> ArtifactSelector<State>
@@ -150,6 +154,7 @@ where
             value_prefix: self.value_prefix.as_deref(),
             value_lower: bound(&self.value_lower),
             value_upper: bound(&self.value_upper),
+            limit: self.limit,
         }
     }
 }
@@ -193,6 +198,7 @@ impl ArtifactSelector<Unconstrained> {
             value_prefix: None,
             value_lower: None,
             value_upper: None,
+            limit: None,
             state_type: PhantomData,
         }
     }
@@ -252,6 +258,19 @@ where
         self.value_upper.as_ref()
     }
 
+    /// The most rows this selector selects, if it has a limit.
+    pub fn limit(&self) -> Option<usize> {
+        self.limit
+    }
+
+    /// The same selector, selecting at most `rows` rows: the first ones in
+    /// the order of the index it scans. A first page of a long range then
+    /// reads only the tree nodes that the page needs.
+    pub fn with_limit(mut self, rows: usize) -> Self {
+        self.limit = Some(rows);
+        self
+    }
+
     /// Set the [`Attribute`] field (the predicate) of the [`ArtifactSelector`]
     pub fn the(self, attribute: Attribute) -> ArtifactSelector<Constrained> {
         ArtifactSelector::<Constrained> {
@@ -265,6 +284,7 @@ where
             value_prefix: self.value_prefix,
             value_lower: self.value_lower,
             value_upper: self.value_upper,
+            limit: self.limit,
             state_type: PhantomData,
         }
     }
@@ -282,6 +302,7 @@ where
             value_prefix: self.value_prefix,
             value_lower: self.value_lower,
             value_upper: self.value_upper,
+            limit: self.limit,
             state_type: PhantomData,
         }
     }
@@ -299,6 +320,7 @@ where
             value_prefix: self.value_prefix,
             value_lower: self.value_lower,
             value_upper: self.value_upper,
+            limit: self.limit,
             state_type: PhantomData,
         }
     }
@@ -374,6 +396,7 @@ where
             value_prefix: self.value_prefix,
             value_lower: self.value_lower,
             value_upper: self.value_upper,
+            limit: self.limit,
             state_type: PhantomData,
         }
     }
@@ -394,6 +417,7 @@ where
             value_prefix: self.value_prefix,
             value_lower: self.value_lower,
             value_upper: self.value_upper,
+            limit: self.limit,
             state_type: PhantomData,
         }
     }
@@ -420,6 +444,7 @@ where
             value_prefix: Some(prefix.into()),
             value_lower: self.value_lower,
             value_upper: self.value_upper,
+            limit: self.limit,
             state_type: PhantomData,
         }
     }
@@ -479,6 +504,7 @@ where
             value_prefix: self.value_prefix,
             value_lower: Some(bound),
             value_upper: self.value_upper,
+            limit: self.limit,
             state_type: PhantomData,
         }
     }
@@ -495,6 +521,7 @@ where
             value_prefix: self.value_prefix,
             value_lower: self.value_lower,
             value_upper: Some(bound),
+            limit: self.limit,
             state_type: PhantomData,
         }
     }

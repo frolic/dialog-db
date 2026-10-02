@@ -910,7 +910,9 @@ impl ArtifactTreeExt for ArtifactTree {
             let manifest = tree.manifest(&storage).await?;
             let range = selector_range(&selector, &manifest);
 
-            let stream = tree.stream_range_handles(range, &storage);
+            // A limited scan reads ahead only the nodes its limit can reach.
+            let reach = selector.limit().map(|rows| rows as u64);
+            let stream = tree.stream_range_handles_reaching(range, &storage, reach);
             // Stage one, synchronous per entry: parse the key ONCE into
             // borrowed components for matching and spill resolution, and
             // finish every inline-valued row on the spot. Nothing else is
@@ -993,9 +995,18 @@ impl ArtifactTreeExt for ArtifactTree {
                 })
                 .buffered(SPILL_LOOKAHEAD);
             tokio::pin!(fetched);
-            for await item in fetched {
-                if let Some(view) = item? {
-                    yield view;
+            // A limited scan stops at its limit and polls nothing past it,
+            // so the tree reads nothing more.
+            let mut left = selector.limit().unwrap_or(usize::MAX);
+            if left > 0 {
+                for await item in fetched {
+                    if let Some(view) = item? {
+                        yield view;
+                        left -= 1;
+                        if left == 0 {
+                            break;
+                        }
+                    }
                 }
             }
         }
@@ -1020,7 +1031,9 @@ impl ArtifactTreeExt for ArtifactTree {
             let manifest = tree.manifest(&storage).await?;
             let range = selector_range(&selector, &manifest);
 
-            let stream = tree.stream_range_handles(range, &storage);
+            // A limited scan reads ahead only the nodes its limit can reach.
+            let reach = selector.limit().map(|rows| rows as u64);
+            let stream = tree.stream_range_handles_reaching(range, &storage, reach);
             // The two stages of `scan`, reconstructing whole facts: an
             // inline-valued row is parsed once and materialized here; a
             // spilled row is parsed again once its block has landed, which
@@ -1072,9 +1085,18 @@ impl ArtifactTreeExt for ArtifactTree {
                 })
                 .buffered(SPILL_LOOKAHEAD);
             tokio::pin!(fetched);
-            for await item in fetched {
-                if let Some(artifact) = item? {
-                    yield artifact;
+            // A limited scan stops at its limit and polls nothing past it,
+            // so the tree reads nothing more.
+            let mut left = selector.limit().unwrap_or(usize::MAX);
+            if left > 0 {
+                for await item in fetched {
+                    if let Some(artifact) = item? {
+                        yield artifact;
+                        left -= 1;
+                        if left == 0 {
+                            break;
+                        }
+                    }
                 }
             }
         }
@@ -1769,6 +1791,61 @@ mod spill_cache_tests {
                  but only {peak} read was ever in flight"
             );
         }
+        Ok(())
+    }
+
+    /// A selector with a limit selects the first rows of its range, in
+    /// the order of the index it scans, and no more. Both scan shapes.
+    #[dialog_common::test]
+    async fn it_selects_the_first_rows_up_to_a_limit() -> anyhow::Result<()> {
+        use crate::ArtifactSelector;
+
+        use futures_util::TryStreamExt as _;
+
+        let store = CountingBlocks::new();
+        let facts: Vec<Artifact> = (0..30)
+            .map(|index| Artifact {
+                the: "item/name".parse().unwrap(),
+                of: format!("urn:item:{index:02}").parse().unwrap(),
+                is: Value::String(format!("item {index}")),
+                cause: None,
+                meta: None,
+            })
+            .collect();
+        let mut delta = ArchiveDelta::zero();
+        let mut tree = ArtifactTree::empty();
+        tree.apply(
+            &store,
+            &mut delta,
+            stream::iter(facts.iter().cloned().map(Instruction::Assert)),
+        )
+        .await?;
+        store.flush(&mut delta);
+
+        let selector = ArtifactSelector::new().of_starting_with("urn:item:");
+        let all: Vec<Artifact> = tree
+            .clone()
+            .scan_owned(store.clone(), spill_cache(), selector.clone())
+            .try_collect()
+            .await?;
+        assert_eq!(all.len(), 30);
+        let first: Vec<Artifact> = tree
+            .clone()
+            .scan_owned(store.clone(), spill_cache(), selector.clone().with_limit(5))
+            .try_collect()
+            .await?;
+        assert_eq!(first, all[..5].to_vec());
+        let views = tree
+            .clone()
+            .scan(store.clone(), spill_cache(), selector.clone().with_limit(5))
+            .try_collect::<Vec<_>>()
+            .await?;
+        assert_eq!(views.len(), 5);
+        let none: Vec<Artifact> = tree
+            .scan_owned(store.clone(), spill_cache(), selector.with_limit(0))
+            .try_collect()
+            .await?;
+        assert!(none.is_empty());
         Ok(())
     }
 
