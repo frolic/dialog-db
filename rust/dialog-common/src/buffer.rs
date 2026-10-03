@@ -51,8 +51,17 @@ impl std::fmt::Debug for Buffer {
 }
 
 impl Buffer {
+    /// A buffer stored under `name`, a name its writer chose, in place of
+    /// the hash of its bytes. A writer that seals what it stores names each
+    /// block so its readers can find it from what they already know.
+    pub fn named(bytes: &[u8], name: Blake3Hash) -> Self {
+        let buffer = Self::from(bytes);
+        let _ = buffer.0.hash.set(name);
+        buffer
+    }
+
     /// Returns the [`Blake3Hash`] of this buffer's contents, computing it if
-    /// necessary.
+    /// necessary. A [`named`](Self::named) buffer returns its name.
     pub fn blake3_hash(&self) -> &Blake3Hash {
         self.0
             .hash
@@ -227,6 +236,14 @@ mod tests {
 
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_dedicated_worker);
+
+    #[dialog_common::test]
+    fn it_carries_the_name_its_writer_gives() {
+        let name = crate::Blake3Hash::hash(b"a name");
+        let buffer = Buffer::named(b"sealed bytes", name.clone());
+        assert_eq!(buffer.blake3_hash(), &name);
+        assert_eq!(buffer.as_ref(), b"sealed bytes");
+    }
 
     #[dialog_common::test]
     fn it_aligns_bytes_from_arbitrary_sources() {
