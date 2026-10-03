@@ -108,7 +108,7 @@ impl Provider<archive::Get> for MemoryStore {
 impl Provider<archive::Put> for MemoryStore {
     async fn execute(&self, capability: Capability<archive::Put>) -> Result<(), ArchiveError> {
         let content = capability.content().to_vec();
-        let key = block_key(&capability, Blake3Hash::hash(&content));
+        let key = block_key(&capability, capability.digest().clone());
         self.inner
             .lock()
             .expect("store lock")
@@ -167,8 +167,8 @@ impl Provider<blob::Read> for MemoryStore {
     }
 }
 
-/// Gathers an import's bytes and files them under the declared digest
-/// once they have been checked against it.
+/// Gathers an import's bytes and files them under the name the import
+/// declares.
 struct Importing {
     store: MemoryStore,
     key: (String, Blake3Hash),
@@ -185,20 +185,14 @@ impl BlobSink for Importing {
 
     async fn finish(self: Box<Self>) -> Result<Blake3Hash, BlobError> {
         let Importing { store, key, buffer } = *self;
-        let hash = Blake3Hash::hash(&buffer);
-        if hash != key.1 {
-            return Err(BlobError::DigestMismatch {
-                expected: key.1.as_bytes().to_base58(),
-                actual: hash.as_bytes().to_base58(),
-            });
-        }
+        let name = key.1.clone();
         store
             .inner
             .lock()
             .expect("store lock")
             .blobs
             .insert(key, buffer);
-        Ok(hash)
+        Ok(name)
     }
 }
 

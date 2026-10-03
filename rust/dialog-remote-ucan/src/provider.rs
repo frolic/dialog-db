@@ -210,8 +210,7 @@ impl Provider<ForkInvocation<UcanSite, Read>> for UcanSite {
 }
 
 /// A blob import is written into a sink that sends the bytes when it
-/// is finished: the digest is bound in the invocation, so the bytes are
-/// checked against it before anything is sent.
+/// is finished, under the name the invocation binds.
 #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl Provider<ForkInvocation<UcanSite, Import>> for UcanSite {
@@ -229,8 +228,8 @@ impl Provider<ForkInvocation<UcanSite, Import>> for UcanSite {
     }
 }
 
-/// Gathers a blob's bytes and sends them, in the request that proves
-/// the import, once they have been checked against the declared digest.
+/// Gathers a blob's bytes and sends them in the request that proves the
+/// import.
 struct Upload {
     invocation: ForkInvocation<UcanSite, Import>,
     buffer: Vec<u8>,
@@ -246,18 +245,14 @@ impl BlobSink for Upload {
 
     async fn finish(self: Box<Self>) -> Result<Blake3Hash, BlobError> {
         let Upload { invocation, buffer } = *self;
-        let expected = invocation.capability.digest().clone();
-        let hash = Blake3Hash::hash(&buffer);
-        if hash != expected {
-            return Err(BlobError::DigestMismatch {
-                expected: expected.as_bytes().to_base58(),
-                actual: hash.as_bytes().to_base58(),
-            });
-        }
+        // The digest is the name the writer gives the blob. A sealed blob
+        // is named by what its readers can compute, not by its bytes, so
+        // the reader checks what it reads.
+        let name = invocation.capability.digest().clone();
         let answer =
             direct::invoke(&invocation.address, &invocation.authorization, Some(buffer)).await?;
         match answer {
-            answer if answer.is_success() => Ok(hash),
+            answer if answer.is_success() => Ok(name),
             answer if answer.is_refusal() => Err(answer.refusal().await.into()),
             answer => Err(BlobError::Storage(format!(
                 "blob import failed: {}",

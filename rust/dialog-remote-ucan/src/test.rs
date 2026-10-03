@@ -400,27 +400,61 @@ async fn it_answers_not_found_for_a_blob_it_does_not_hold(
 }
 
 #[dialog_common::test]
-async fn it_refuses_an_import_whose_bytes_do_not_hash_to_the_digest(
+async fn it_stores_under_the_name_its_writer_gives(
     service: UcanServiceAddress,
 ) -> anyhow::Result<()> {
     let (signer, subject) = owner().await;
-    let content = b"what the invocation declares".to_vec();
+    let content = b"sealed bytes, named by what a reader computes".to_vec();
+    let name = Blake3Hash::hash(b"a name the writer gives");
+
+    perform(
+        &service,
+        &signer,
+        subject
+            .clone()
+            .writer()
+            .archive()
+            .catalog("index")
+            .put(Buffer::named(&content, name.clone())),
+    )
+    .await?;
+    let served = perform(
+        &service,
+        &signer,
+        subject
+            .clone()
+            .reader()
+            .archive()
+            .catalog("index")
+            .get(name.clone()),
+    )
+    .await?;
+    assert_eq!(served, Some(content.clone()));
+
     let mut sink = perform(
         &service,
         &signer,
         subject
+            .clone()
             .writer()
             .archive()
             .blob()
-            .import(Blake3Hash::hash(&content), content.len() as u64),
+            .import(name.clone(), content.len() as u64),
     )
     .await?;
-    sink.write_all(b"what is actually written.....").await?;
-    let finished = sink.finish().await;
-    assert!(
-        matches!(finished, Err(BlobError::DigestMismatch { .. })),
-        "got {finished:?}"
-    );
+    sink.write_all(&content).await?;
+    assert_eq!(sink.finish().await?, name);
+    let mut source = perform(
+        &service,
+        &signer,
+        subject.reader().archive().blob().read(name),
+    )
+    .await?;
+    let mut read = Vec::new();
+    while let Some(chunk) = source.next().await? {
+        read.extend_from_slice(&chunk);
+    }
+    assert_eq!(read, content);
     Ok(())
 }
 
@@ -587,25 +621,20 @@ mod layer {
     }
 
     #[dialog_common::test]
-    async fn it_refuses_an_import_that_does_not_hash_to_its_digest() {
+    async fn it_stores_an_import_under_the_name_it_declares() {
         let (signer, subject) = owner().await;
         let content = b"a blob of some length".to_vec();
         let capability = subject
             .writer()
             .archive()
             .blob()
-            .import(Blake3Hash::hash(&content), content.len() as u64);
+            .import(Blake3Hash::hash(b"a name"), content.len() as u64);
         let value = credential_for(&signer, &capability).await;
         let access = Access::new(MemoryStore::default());
-        let other = b"a blob of same length".to_vec();
-        let request = Request::new(Some(&value)).payload(other);
+        let request = Request::new(Some(&value)).payload(content);
         let (status, body) = performed(access.handle(request).await).await;
-        assert_eq!(status, 400);
-        assert!(
-            String::from_utf8_lossy(&body).contains("DigestMismatch"),
-            "{body:?}"
-        );
-        assert_eq!(access.provider().blobs(), 0, "nothing was stored");
+        assert_eq!(status, 200, "{body:?}");
+        assert_eq!(access.provider().blobs(), 1);
     }
 
     #[dialog_common::test]

@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use dialog_capability::access::AuthorizeError;
 use dialog_capability::{Did, Policy, Provider, Subject};
-use dialog_common::{Blake3Hash, Buffer, Checksum, ConditionalSync};
+use dialog_common::{Buffer, Checksum, ConditionalSync};
 use dialog_did_web::{CachingResolver, Resolve, WebResolver};
 use dialog_effects::MethodExt as _;
 use dialog_effects::Rejection;
@@ -488,10 +488,12 @@ where
         if payload.is_empty() {
             return Err(Failure::length_required());
         }
+        // The bytes are the ones the invocation bound. Their name is the
+        // one the writer gave: a writer that seals what it stores names a
+        // block by what its readers can compute, and a reader checks what
+        // it reads against the name it asked for.
         let bound = PutAttenuation::of(&attenuated);
-        if Blake3Hash::hash(&payload) != bound.digest
-            || Checksum::sha256(&payload) != bound.checksum
-        {
+        if Checksum::sha256(&payload) != bound.checksum {
             return Err(Failure::checksum_mismatch());
         }
         let capability = Subject::from(subject.clone())
@@ -499,7 +501,10 @@ where
             .archive()
             .attenuate(Catalog::of(&attenuated).clone())
             .attenuate(archive::Block::new())
-            .invoke(archive::Put::new(Buffer::from(payload)));
+            .invoke(archive::Put::new(Buffer::named(
+                &payload,
+                bound.digest.clone(),
+            )));
         Provider::<archive::Put>::execute(&self.provider, capability).await?;
         Ok(Response::status(200))
     }
