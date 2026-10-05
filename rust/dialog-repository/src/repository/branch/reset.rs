@@ -85,6 +85,7 @@ mod tests {
             tree: TreeReference::from([7u8; 32]),
             edition: Edition::GENESIS,
             context: None,
+            sealed: None,
             signature: Vec::new(),
             prefetch: Vec::new(),
         };

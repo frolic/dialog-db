@@ -2412,6 +2412,9 @@ async fn assert_remote_closure_complete(
             match reference {
                 ShipmentRef::BlobAdded {
                     hash: blob_hash, ..
+                }
+                | ShipmentRef::SealedAdded {
+                    address: blob_hash, ..
                 } => {
                     let digest = NodeHash::from(*blob_hash);
                     let probe = address
