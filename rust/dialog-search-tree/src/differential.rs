@@ -1758,6 +1758,29 @@ where
         &self.target.unresolved
     }
 
+    /// The hashes of target nodes the source holds: those the source side
+    /// has seen, and every node below an expanded one among them. A node's
+    /// hash covers its whole subtree, so a shared node's descendants are
+    /// shared however far the walk expanded them.
+    fn shared_target_hashes(&self) -> Result<HashSet<Blake3Hash>, DialogSearchTreeError> {
+        let mut shared = self.source.seen.clone();
+        let mut grew = true;
+        while grew {
+            grew = false;
+            for node in &self.target.expanded {
+                if !shared.contains(node.hash()) {
+                    continue;
+                }
+                if let NodeBody::Index(index) = node.body() {
+                    for link in index.links()? {
+                        grew |= shared.insert(link.node);
+                    }
+                }
+            }
+        }
+        Ok(shared)
+    }
+
     /// Returns a stream of the nodes present in the target tree but absent
     /// from the source tree.
     ///
@@ -1772,9 +1795,13 @@ where
             // A target node whose hash the source side has seen (in its
             // frontier, pruned or expanded) is shared, not novel, even when
             // frontier alignment forced it to be expanded before its match
-            // surfaced.
+            // surfaced. Its whole subtree is shared too: pending ops keep a
+            // node from pruning, so the walk can expand a shared node down to
+            // its leaves, and those leaves were never in the source's
+            // frontier to be seen.
+            let shared = self.shared_target_hashes()?;
             for node in &self.target.expanded {
-                if self.source.seen.contains(node.hash()) {
+                if shared.contains(node.hash()) {
                     continue;
                 }
                 yield node.clone();
@@ -1786,10 +1813,7 @@ where
                 // buffers them, and that ancestor is in `expanded` above, so
                 // the seen-check below is still the right test for the block
                 // this frontier entry names.
-                if sparse_node
-                    .hash()
-                    .is_some_and(|hash| self.source.seen.contains(hash))
-                {
+                if sparse_node.hash().is_some_and(|hash| shared.contains(hash)) {
                     continue;
                 }
                 // A settled node names no block of its own: its ops live in the
@@ -5428,6 +5452,97 @@ mod tests {
             4usize,
         )])
         .await
+    }
+
+    /// One more op on a tree whose nodes buffer ops reports only the blocks
+    /// that op changed. Pending ops keep a shared subtree from pruning, so
+    /// the walk can expand it on the target side down to its leaves while
+    /// the source side never expands its copy. Those leaves are still shared.
+    #[dialog_common::test]
+    async fn it_reports_no_leaf_of_a_shared_subtree_as_novel() -> Result<()> {
+        use futures_util::TryStreamExt as _;
+
+        let mut storage = CountingBackend::new();
+        // Small nodes, so a few thousand keys make a tree three levels deep.
+        let manifest = crate::Manifest {
+            max_segment: 1024,
+            ..crate::Manifest::default()
+        };
+        let mut edit =
+            crate::TransientTree::empty_with_manifest(TestTree::empty().node_cache(), manifest);
+        for index in 0..5_000u32 {
+            edit = edit.insert(bkey(index * 2), vec![0], &storage).await?;
+        }
+        let mut delta = Delta::zero();
+        let base = edit.persist(&mut delta)?;
+        for (_, buffer) in delta.flush() {
+            storage.store(buffer);
+        }
+
+        let spread: Vec<ByteOp> = (0..8u32)
+            .map(|index| (true, bkey(index * 1_250 + 1), vec![1]))
+            .collect();
+        let source = buffered_bytes(&base, &spread, 1_000_000, &mut storage).await?;
+        let target = buffered_bytes(
+            &source,
+            &[(true, bkey(7_001), vec![2])],
+            1_000_000,
+            &mut storage,
+        )
+        .await?;
+
+        let remote = CountingBackend::new();
+        let seeded =
+            TreeDifference::compute(&TestTree::empty(), &source, &storage, &storage).await?;
+        let blocks: Vec<_> = {
+            let stream = seeded.novel_nodes();
+            futures_util::pin_mut!(stream);
+            stream.try_collect().await?
+        };
+        for node in blocks {
+            remote.store(node.buffer().clone());
+        }
+
+        let difference = TreeDifference::compute(&source, &target, &storage, &storage).await?;
+        let novel: Vec<_> = {
+            let stream = difference.novel_nodes();
+            futures_util::pin_mut!(stream);
+            stream.try_collect().await?
+        };
+        let mut held = 0;
+        for node in &novel {
+            if remote.get(node.hash()).is_some() {
+                held += 1;
+            }
+            remote.store(node.buffer().clone());
+        }
+        assert_eq!(
+            held,
+            0,
+            "{} of {} novel nodes are already held",
+            held,
+            novel.len()
+        );
+
+        let expected: Vec<([u8; 4], Vec<u8>)> = {
+            let stream = target.stream(&storage);
+            futures_util::pin_mut!(stream);
+            stream
+                .map_ok(|entry| (entry.key, entry.value))
+                .try_collect()
+                .await?
+        };
+        let restored = TestTree::from_hash(target.root().clone());
+        let actual: Vec<([u8; 4], Vec<u8>)> = {
+            let stream = restored.stream(&remote);
+            futures_util::pin_mut!(stream);
+            stream
+                .map_ok(|entry| (entry.key, entry.value))
+                .try_collect()
+                .await?
+        };
+        assert_eq!(actual, expected, "the novel nodes materialize the target");
+        Ok(())
     }
 
     async fn novel_nodes_case(cases: Vec<(&str, Vec<ByteOp>, usize)>) -> Result<()> {
