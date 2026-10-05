@@ -221,6 +221,7 @@ impl Asset {
             of: self.entity()?,
             is: copy.value(self.size),
             cause: None,
+            meta: None,
         })
     }
 }
