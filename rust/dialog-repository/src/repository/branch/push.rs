@@ -530,7 +530,8 @@ where
                 // round trip. A partial replica may not hold the history
                 // of every newest revision, so a miss reads from the target.
                 let mut published = revision.clone();
-                let named_from = NetworkedIndex::new(env, index.clone(), remote.clone());
+                let named_from =
+                    NetworkedIndex::new(env, index.clone(), remote.clone()).sealed(sealing.clone());
                 published.prefetch = name_prefetch(&revision, named_from).await?;
                 upstream.publish(published).perform(env).await?;
             }
