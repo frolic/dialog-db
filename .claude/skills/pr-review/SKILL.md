@@ -1,11 +1,11 @@
 ---
 name: pr-review
-description: Have a Fable agent review a change for design and correctness, then fix what it finds. Use before a change is ready for review or before it lands, and again after a large change to it.
+description: Have a Fable agent review a change for design and correctness, then judge and fix what it finds. Use before a change is ready for review or before it lands, and again after a large change to it.
 ---
 
 # Review a change
 
-The agent that wrote a change does not review it alone. A second agent on Claude Fable reads the change with fresh context. The author then fixes the findings.
+The agent that wrote a change does not review it alone. A second agent on Claude Fable reads the change with fresh context. The reviewer is strict on purpose, so some findings are wrong or too small. The author judges each finding before acting on it.
 
 ## Steps
 
@@ -15,14 +15,13 @@ The agent that wrote a change does not review it alone. A second agent on Claude
    - one or two sentences on what the change is for
    - the text of the sections "What to look for", "What not to report", and "How to report" below
    - this instruction: "Read the code and report findings. Do not edit files, commit, or post to GitHub."
-3. Fix each **Blocking** finding.
-4. For each **Design** finding, do the simpler design in this change when it is in scope. Do not add a workaround in its place. When the refactor is too large for this change, say why and name the follow-up.
-5. If the fixes changed the design, run the review again. Stop when no Blocking or Design finding is left, or after three rounds.
-6. Add a short "Review" section to the pull request text, or to the commit message when the repository pushes to `main`. List each finding and what you did about it.
+3. Judge each finding as "Judge the findings" says. Then fix the findings you keep.
+4. If the fixes changed the design, run the review again. Stop when no finding is left to fix, or after three rounds.
+5. Add a short "Review" section to the pull request text, or to the commit message when the repository pushes to `main`. List each finding, what you did, and one line on why. Include the findings you dismissed, so a person can overrule you.
 
 ## What to look for
 
-Read the repository's `CLAUDE.md` (or `AGENTS.md`, or `.claude/rules/`) and the design docs it names first. They state the rules and the words of the project. Read the whole change, then the code around it. Judge the design that results, not only the lines that changed.
+Read the repository's `CLAUDE.md` (or `AGENTS.md`, or `.claude/rules/`) and the design docs it names first. They state the rules and the words of the project. Read the whole change, then the code around it. Judge the design that results, not only the lines that changed. Use the items below that fit the change. A small fix does not need a design review. Do not question the goal of the change. Question how the change meets it.
 
 Be ambitious. Do not stop at "this could be a bit cleaner". Look for a restructure that keeps the behaviour and makes whole branches, flags, helpers, or layers disappear. A refactor that moves complexity to a new place but does not remove it is not a fix.
 
@@ -34,6 +33,7 @@ Be ambitious. Do not stop at "this could be a bit cleaner". Look for a restructu
    - a workaround that needs a long comment to explain it
 
    When the code branches on the same question in many places, a missing model is the cause. Use a state machine, a discriminated union, or a lookup table so the branches go away.
+
 3. **No new jargon.** A new term needs a strong reason and a clear definition in the docs. Prefer the project's existing words and common words. Flag a new name for a thing that already has a name.
 4. **Simple names.** A name says what the caller gets. Use full words, no abbreviations. A name does not tell how the code works or where it came from.
 5. **Boundaries that make removal easy.** Each part does one job behind a small interface. It must be possible to delete or replace a part and change only the code that calls it. Flag:
@@ -49,15 +49,42 @@ Be ambitious. Do not stop at "this could be a bit cleaner". Look for a restructu
 ## What not to report
 
 - Format, lint, and type errors. The checks in step 1 find them.
-- A taste preference that does not make the code simpler or safer.
+- A different approach that you prefer, when you cannot show a concrete problem with the current one.
+- A case that no caller or input can reach. Read the callers and the types before you report it.
+- A new abstraction for code that changes in only one way today.
 - A problem that was in the code before this change, unless the change makes it worse.
 
 ## How to report
 
-- Give each finding a `file:line`. Start it with **Blocking** (a bug, a security problem, or a doc that is now wrong) or **Design** (items 1 to 7).
-- For a Design finding, say what is wrong, what a simpler design is, and what it removes.
-- Prefer a few findings you are sure of to a long list. Report every Blocking and Design finding. Report at most three small items.
-- Start with the number of findings of each kind, or with "No findings."
+- Start with the number of findings of each kind, or with "No findings." A review with no findings is a good result. Do not add small items to fill the review.
+- Give each finding a `file:line`. Start it with **Blocking** (a bug, a security problem, or a doc that is now wrong) or **Design** (items 1 to 7). Report at most three small items, marked **Small**.
+- For each finding, give the evidence. For a bug, name the caller or input that causes it and the steps from there to the failure. For a Design finding, say what is wrong, what a simpler design is, and what it removes.
+- If you think a finding is real but you cannot show the path, say so. Do not state a guess as a fact.
 - Write in ASD-STE100 Simplified Technical English.
 
-The review rules adapt the pstack skills `thermo-nuclear-code-quality-review` and its `principle-*` skills (github.com/cursor/plugins, pstack).
+## Judge the findings
+
+You are the lead reviewer. The findings are not a list of tasks. The reviewer saw only the code. You also know the goal, what was tried before, and what the next change will do. Put each finding in one of four groups:
+
+- **Fix.** The finding shows a real path to a bug, or a structural problem that this change adds. Fix it in this change. When the refactor is too large for this change, say why in the Review section and open an issue. Do not add a workaround in its place.
+- **Ask.** The answer changes a goal, a public format, or something that cannot be undone. Ask a person, and continue with the safe choice where you can.
+- **Note.** The finding is true but small for this stage, or it is about code that this change does not touch. Write it in the Review section, or open an issue when it needs work later.
+- **Dismiss.** The finding is wrong, depends on a case that cannot occur, or is a preference. Give the reason in one line.
+
+Use these tests:
+
+- **Trace it.** For "what if X is null" or "what if this runs twice", find the real caller. If the types or an earlier check prevent the case, dismiss the finding.
+- **Weigh it.** Compare the code a fix adds with what it prevents. A guard for an unlikely case is the kind of workaround the review exists to stop. Do not add it.
+- **Take it seriously** when the finding names a concrete path, when you read it and think "yes, that is right", or when it shows a gap in what you understood. Before you dismiss a security or correctness finding, trace it yourself.
+
+If more than five findings are in Fix, judge them again, harder. If more than five are still in Fix, read the next section.
+
+## When the structure is wrong
+
+Some findings say that the design is wrong, not a line. Do not add another fix of the same kind.
+
+1. If the same finding comes back after you fixed it, or two fixes in a row fail on the same problem, write down in one sentence what the fixes assumed. Check if that assumption is true.
+2. Ask: "If we wrote this part today with this requirement from the start, what would we build?"
+3. If the answer is not clear, sketch two or three different designs and compare them. Prefer the one that removes the most code and the most rules a reader must know.
+
+The review rules adapt these pstack skills (github.com/cursor/plugins): `thermo-nuclear-code-quality-review`, the rubric and lead judgment of `interrogate`, and the `principle-*` skills, mostly `attack-the-premise`, `fix-root-causes`, `redesign-from-first-principles`, `exhaust-the-design-space`, and `subtract-before-you-add`.
